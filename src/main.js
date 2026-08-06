@@ -1,672 +1,368 @@
-import Storehouse from 'storehouse-js';
-import * as monaco from 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/+esm';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
-import mermaid from 'mermaid';
+import './styles/app.css';
+
+import { defaultDocument } from './default-document.js';
+import { t } from './modules/strings.js';
+import { read, KEYS } from './modules/storage.js';
+import * as editorModule from './modules/editor.js';
+import * as renderer from './modules/renderer.js';
+import * as mermaidRenderer from './modules/mermaid.js';
+import * as theme from './modules/theme.js';
+import * as layout from './modules/layout.js';
+import * as railModule from './modules/rail.js';
+import * as toolbarModule from './modules/toolbar.js';
+import * as paletteModule from './modules/palette.js';
+import * as scrollSync from './modules/scroll-sync.js';
+import * as files from './modules/files.js';
+import * as workspaceModule from './modules/workspace.js';
+import { toPdf } from './modules/export.js';
+
+const TOAST_MS = 3200;
+
+// Fill every [data-i18n] slot from the strings table so the markup carries no
+// copy of its own.
+const applyStrings = (root) => {
+    root.querySelectorAll('[data-i18n]').forEach((element) => {
+        const value = t[element.dataset.i18n];
+        if (typeof value === 'string') {
+            element.textContent = value;
+        }
+    });
+};
+
+const titleOf = (headings) =>
+    headings.find((h) => h.level === 1)?.text || headings[0]?.text || t.untitled;
 
 const init = () => {
-    let hasEdited = false;
-    let scrollBarSync = false;
+    const el = {
+        container: document.querySelector('#container'),
+        divider: document.querySelector('#split-divider'),
+        editorHost: document.querySelector('#editor'),
+        preview: document.querySelector('#preview'),
+        output: document.querySelector('#output'),
+        previewWrapper: document.querySelector('#preview-wrapper'),
+        toolbar: document.querySelector('#toolbar'),
+        outline: document.querySelector('#outline'),
+        headingCount: document.querySelector('#heading-count'),
+        rail: document.querySelector('#rail'),
+        railEmpty: document.querySelector('#rail-empty'),
+        railToggle: document.querySelector('#rail-toggle'),
+        folderButton: document.querySelector('#folder-button'),
+        folderName: document.querySelector('#folder-name'),
+        folderMenu: document.querySelector('#folder-menu'),
+        recentFolders: document.querySelector('#recent-folders'),
+        pickFolder: document.querySelector('#pick-folder'),
+        closeFolder: document.querySelector('#close-folder'),
+        emptyOpen: document.querySelector('#empty-open'),
+        modes: document.querySelector('#modes'),
+        docTitle: document.querySelector('#doc-title'),
+        saveDot: document.querySelector('#save-dot'),
+        resetButton: document.querySelector('#reset-button'),
+        copyButton: document.querySelector('#copy-button'),
+        exportButton: document.querySelector('#export-button'),
+        searchButton: document.querySelector('#search-button'),
+        searchShortcut: document.querySelector('#search-shortcut'),
+        searchInput: document.querySelector('#search-input'),
+        searchResults: document.querySelector('#search-results'),
+        scrim: document.querySelector('#scrim'),
+        syncCheckbox: document.querySelector('#sync-scroll-checkbox'),
+        themeButton: document.querySelector('#theme-button'),
+        toast: document.querySelector('#toast'),
+        mobileTabs: Array.from(document.querySelectorAll('.mobile-tab'))
+    };
 
-    const localStorageNamespace = 'com.markdownlivepreview';
-    const localStorageKey = 'last_state';
-    const localStorageScrollBarKey = 'scroll_bar_settings';
-    const localStorageThemeKey = 'theme_settings';
-    const confirmationMessage = 'Are you sure you want to reset? Your changes will be lost.';
-    let mermaidRenderTimer = null;
-    let mermaidRenderVersion = 0;
-    // default template
-    const defaultInput = `# Markdown syntax guide
+    applyStrings(document);
+    el.rail.setAttribute('aria-label', t.railLabel);
+    el.searchInput.placeholder = t.searchPlaceholder;
 
-## Headers
+    const isMac = /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent);
+    el.searchShortcut.textContent = isMac ? '⌘K' : 'Ctrl K';
 
-# This is a Heading h1
-## This is a Heading h2
-###### This is a Heading h6
+    theme.init();
 
-## Emphasis
+    const editor = editorModule.create(el.editorHost);
+    editor.getModel()?.updateOptions({ tabSize: 2 });
+    editorModule.setTheme(theme.isDark());
 
-*This text will be italic*  
-_This will also be italic_
+    // ----- toast -----
 
-**This text will be bold**  
-__This will also be bold__
+    let toastTimer = null;
+    const toast = (message) => {
+        el.toast.textContent = message;
+        el.toast.hidden = false;
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => {
+            el.toast.hidden = true;
+        }, TOAST_MS);
+    };
 
-_You **can** combine them_
+    // ----- workspace -----
 
-## Lists
+    // Set while a file is being loaded into the editor, so the resulting
+    // change event is not mistaken for the user typing.
+    let loading = false;
 
-### Unordered
+    // Declared before the workspace so its callbacks can reach it. The rail's
+    // own callback reaches the workspace through a closure that only runs on
+    // click, by which point both exist.
+    const rail = railModule.setup({
+        container: el.outline,
+        countLabel: el.headingCount,
+        preview: el.preview,
+        output: el.output,
+        onOpenFile: (entry) => workspace.openEntry(entry)
+    });
 
-* Item 1
-* Item 2
-* Item 2a
-* Item 2b
-    * Item 3a
-    * Item 3b
+    const workspace = workspaceModule.create({
+        onFilesChanged: (entries) => {
+            rail.setFiles(entries);
+            syncFolderChrome();
+        },
+        onFileOpened: ({ entry, text }) => {
+            loading = true;
+            editor.setValue(text ?? defaultDocument);
+            editor.revealPosition({ lineNumber: 1, column: 1 });
+            loading = false;
+            el.preview.scrollTo({ top: 0 });
+            rail.setCurrentPath(entry?.path ?? null);
+            editor.focus();
+        },
+        onDirtyChanged: (dirty) => {
+            el.saveDot.classList.toggle('dirty', dirty);
+            el.saveDot.title = dirty ? t.unsaved : t.saved;
+            rail.setDirty(dirty);
+        },
+        onError: toast
+    });
 
-### Ordered
+    toolbarModule.setup({ container: el.toolbar, editor });
 
-1. Item 1
-2. Item 2
-3. Item 3
-    1. Item 3a
-    2. Item 3b
+    // ----- render pipeline -----
 
-## Images
+    const convert = (markdown) => {
+        el.output.innerHTML = renderer.render(markdown);
+        const headings = renderer.outline(el.output);
+        rail.setHeadings(headings);
+        const entry = workspace.currentEntry();
+        el.docTitle.textContent = entry ? entry.name : titleOf(headings);
+        mermaidRenderer.scheduleRender(el.output, theme.mermaidTheme());
+    };
 
-![This is an alt text.](/image/Markdown-mark.svg "This is a sample image.")
-
-## Links
-
-You may be using [Markdown Live Preview](https://markdownlivepreview.com/).
-
-## Blockquotes
-
-> Markdown is a lightweight markup language with plain-text-formatting syntax, created in 2004 by John Gruber with Aaron Swartz.
->
->> Markdown is often used to format readme files, for writing messages in online discussion forums, and to create rich text using a plain text editor.
-
-## Tables
-
-| Left columns  | Right columns |
-| ------------- |:-------------:|
-| left foo      | right foo     |
-| left bar      | right bar     |
-| left baz      | right baz     |
-
-## Blocks of code
-
-${"`"}${"`"}${"`"}
-let message = 'Hello world';
-alert(message);
-${"`"}${"`"}${"`"}
-
-## Mermaid diagrams
-${"`"}${"`"}${"`"}mermaid
-graph TD
-  A[Start] --> B{Decision}
-  B -->|Yes| C[Finish]
-  B -->|No| D[Alternate]
-${"`"}${"`"}${"`"}
-
-## Inline code
-
-This web site is using ${"`"}markedjs/marked${"`"}.
-`;
-
-    self.MonacoEnvironment = {
-        getWorker(_, label) {
-            return new Proxy({}, { get: () => () => { } });
+    editor.onDidChangeModelContent(() => {
+        const value = editor.getValue();
+        convert(value);
+        if (!loading) {
+            workspace.recordEdit(value);
         }
-    }
+    });
 
-    let setupEditor = () => {
-        let editor = monaco.editor.create(document.querySelector('#editor'), {
-            fontSize: 14,
-            language: 'markdown',
-            minimap: { enabled: false },
-            scrollBeyondLastLine: false,
-            automaticLayout: true,
-            scrollbar: {
-                vertical: 'visible',
-                horizontal: 'visible'
-            },
-            wordWrap: 'on',
-            hover: { enabled: false },
-            quickSuggestions: false,
-            suggestOnTriggerCharacters: false,
-            folding: false
-        });
+    // ----- folder chrome -----
 
-        editor.onDidChangeModelContent(() => {
-            let changed = editor.getValue() != defaultInput;
-            if (changed) {
-                hasEdited = true;
-            }
-            let value = editor.getValue();
-            convert(value);
-            saveLastContent(value);
-        });
+    const syncFolderChrome = () => {
+        const open = workspace.isFolderOpen();
+        el.folderName.textContent = open ? workspace.folderName() : t.noFolder;
+        el.rail.dataset.folder = open ? 'open' : 'empty';
+        el.railEmpty.hidden = open;
+        el.closeFolder.hidden = !open;
 
-        editor.onDidScrollChange((e) => {
-            if (!scrollBarSync) {
-                return;
-            }
-
-            const scrollTop = e.scrollTop;
-            const scrollHeight = e.scrollHeight;
-            const height = editor.getLayoutInfo().height;
-
-            const maxScrollTop = scrollHeight - height;
-            const scrollRatio = scrollTop / maxScrollTop;
-
-            let previewElement = document.querySelector('#preview');
-            let targetY = (previewElement.scrollHeight - previewElement.clientHeight) * scrollRatio;
-            previewElement.scrollTo(0, targetY);
-        });
-
-        return editor;
+        el.folderButton.title = open
+            ? `${workspace.folderName()} · ${t.fileCount(workspace.entries().length)}`
+            : t.switchFolder;
     };
 
-    let escapeHtml = (value) => {
-        return value
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
+    const setMenu = (open) => {
+        el.folderMenu.hidden = !open;
+        el.folderButton.setAttribute('aria-expanded', String(open));
+        if (open) {
+            paintRecents();
+        }
     };
 
-    let createMarkedRenderer = () => {
-        const renderer = new marked.Renderer();
-        const renderCode = renderer.code.bind(renderer);
-
-        renderer.code = (token) => {
-            const lang = (token.lang || '').match(/^\S*/)?.[0].toLowerCase();
-            if (lang !== 'mermaid') {
-                return renderCode(token);
-            }
-
-            return `<pre class="mermaid">${escapeHtml(token.text)}</pre>\n`;
-        };
-
-        return renderer;
-    };
-
-    let configureMermaid = (theme) => {
-        mermaid.initialize({
-            startOnLoad: false,
-            securityLevel: 'strict',
-            theme
-        });
-    };
-
-    let showMermaidError = (element, error) => {
-        const message = error && error.message ? error.message : 'Unable to render Mermaid chart.';
-        element.classList.add('mermaid-error');
-        element.textContent = `Mermaid render error: ${message}`;
-    };
-
-    let getMermaidTheme = () => {
-        return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'default';
-    };
-
-    let renderMermaidDiagramsNow = async (theme = getMermaidTheme()) => {
-        const outputElement = document.querySelector('#output');
-        if (!outputElement) {
+    const paintRecents = async () => {
+        const records = await files.recentFolders();
+        if (records.length === 0) {
+            const empty = document.createElement('span');
+            empty.className = 'menu-empty';
+            empty.textContent = t.noRecentFolders;
+            el.recentFolders.replaceChildren(empty);
             return;
         }
 
-        const version = ++mermaidRenderVersion;
-        configureMermaid(theme);
+        el.recentFolders.replaceChildren(
+            ...records.map((record) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'menu-item';
+                button.setAttribute('role', 'menuitem');
+                button.setAttribute('aria-current', String(record.name === workspace.folderName()));
 
-        const elements = Array.from(outputElement.querySelectorAll('.mermaid'));
-        for (const [index, element] of elements.entries()) {
-            if (version !== mermaidRenderVersion) {
-                return;
-            }
+                const name = document.createElement('span');
+                name.className = 'name';
+                name.textContent = record.name;
+                button.appendChild(name);
 
-            const source = element.dataset.mermaidSource || element.textContent;
-            element.dataset.mermaidSource = source;
-            element.classList.remove('mermaid-error');
-
-            try {
-                const renderId = `mermaid-${Date.now()}-${version}-${index}`;
-                const { svg, bindFunctions } = await mermaid.render(renderId, source);
-                if (version !== mermaidRenderVersion) {
-                    return;
-                }
-                element.innerHTML = svg;
-                if (typeof bindFunctions === 'function') {
-                    bindFunctions(element);
-                }
-            } catch (error) {
-                showMermaidError(element, error);
-            }
-        }
-    };
-
-    let scheduleMermaidRender = () => {
-        if (mermaidRenderTimer) {
-            clearTimeout(mermaidRenderTimer);
-        }
-
-        mermaidRenderTimer = setTimeout(() => {
-            mermaidRenderTimer = null;
-            renderMermaidDiagramsNow();
-        }, 150);
-    };
-
-    let renderMermaidDiagrams = (theme) => {
-        if (mermaidRenderTimer) {
-            clearTimeout(mermaidRenderTimer);
-            mermaidRenderTimer = null;
-        }
-
-        return renderMermaidDiagramsNow(theme);
-    };
-
-    let renderer = createMarkedRenderer();
-
-    // Render markdown text as html
-    let convert = (markdown) => {
-        let options = {
-            headerIds: false,
-            mangle: false,
-            renderer
-        };
-        let html = marked.parse(markdown, options);
-        let sanitized = DOMPurify.sanitize(html);
-        document.querySelector('#output').innerHTML = sanitized;
-        scheduleMermaidRender();
-    };
-
-    // Reset input text
-    let reset = () => {
-        let changed = editor.getValue() != defaultInput;
-        if (hasEdited || changed) {
-            var confirmed = window.confirm(confirmationMessage);
-            if (!confirmed) {
-                return;
-            }
-        }
-        presetValue(defaultInput);
-        document.querySelectorAll('.column').forEach((element) => {
-            element.scrollTo({ top: 0 });
-        });
-    };
-
-    let presetValue = (value) => {
-        editor.setValue(value);
-        editor.revealPosition({ lineNumber: 1, column: 1 });
-        editor.focus();
-        hasEdited = false;
-    };
-
-    // ----- sync scroll position -----
-
-    let initScrollBarSync = (settings) => {
-        let checkbox = document.querySelector('#sync-scroll-checkbox');
-        checkbox.checked = settings;
-        scrollBarSync = settings;
-
-        checkbox.addEventListener('change', (event) => {
-            let checked = event.currentTarget.checked;
-            scrollBarSync = checked;
-            saveScrollBarSettings(checked);
-        });
-    };
-
-    // ----- preview CSS loader (switch github-markdown css) -----
-    const PREVIEW_CSS_LIGHT = 'css/github-markdown-light.css?v=1.11.0';
-    const PREVIEW_CSS_DARK = 'css/github-markdown-dark_dimmed.css?v=1.11.0';
-
-    let setPreviewCss = (useDark) => {
-        const link = document.getElementById('gh-markdown-link');
-        if (!link) {
-            // fallback: create link element
-            const newLink = document.createElement('link');
-            newLink.id = 'gh-markdown-link';
-            newLink.rel = 'stylesheet';
-            newLink.href = useDark ? PREVIEW_CSS_DARK : PREVIEW_CSS_LIGHT;
-            document.head.appendChild(newLink);
-            return;
-        }
-
-        // Only update if href differs to avoid unnecessary reload
-        const desired = useDark ? PREVIEW_CSS_DARK : PREVIEW_CSS_LIGHT;
-        if (link.getAttribute('href') !== desired) {
-            link.setAttribute('href', desired);
-        }
-    };
-
-    // ----- theme toggle (dark/light) -----
-    let setTheme = (enabled) => {
-        document.documentElement.setAttribute('data-theme', enabled ? 'dark' : 'light');
-    };
-
-    let initThemeToggle = (settings) => {
-        let checkbox = document.querySelector('#theme-checkbox');
-        if (!checkbox) return;
-        checkbox.checked = settings;
-        setTheme(settings);
-
-        // set Monaco editor theme to match page theme
-        if (monaco && monaco.editor && typeof monaco.editor.setTheme === 'function') {
-            monaco.editor.setTheme(settings ? 'vs-dark' : 'vs');
-        }
-        // set preview css to match theme
-        setPreviewCss(settings);
-
-        checkbox.addEventListener('change', (event) => {
-            let checked = event.currentTarget.checked;
-            setTheme(checked);
-            saveThemeSettings(checked);
-            setPreviewCss(checked);
-            if (monaco && monaco.editor && typeof monaco.editor.setTheme === 'function') {
-                monaco.editor.setTheme(checked ? 'vs-dark' : 'vs');
-            }
-            renderMermaidDiagrams();
-        });
-    };
-
-    let enableScrollBarSync = () => {
-        scrollBarSync = true;
-    };
-
-    let disableScrollBarSync = () => {
-        scrollBarSync = false;
-    };
-
-    // ----- clipboard utils -----
-
-    let copyToClipboard = (text, successHandler, errorHandler) => {
-        navigator.clipboard.writeText(text).then(
-            () => {
-                successHandler();
-            },
-
-            () => {
-                errorHandler();
-            }
+                button.addEventListener('click', async () => {
+                    setMenu(false);
+                    await workspace.reopenFolder(record.handle);
+                });
+                return button;
+            })
         );
     };
 
-    let notifyCopied = () => {
-        let labelElement = document.querySelector("#copy-button a");
-        labelElement.innerHTML = "Copied!";
-        setTimeout(() => {
-            labelElement.innerHTML = "Copy";
-        }, 1000)
-    };
+    if (files.isSupported()) {
+        el.folderButton.addEventListener('click', (event) => {
+            event.stopPropagation();
+            setMenu(el.folderMenu.hidden);
+        });
+        el.folderMenu.addEventListener('click', (event) => event.stopPropagation());
+        document.addEventListener('click', () => setMenu(false));
 
-    // ----- export preview -----
+        const openFolder = async () => {
+            setMenu(false);
+            await workspace.openFolder();
+        };
 
-    let exportLightCssPromise = null;
+        el.pickFolder.addEventListener('click', openFolder);
+        el.emptyOpen.addEventListener('click', openFolder);
+        el.closeFolder.addEventListener('click', () => {
+            setMenu(false);
+            workspace.closeFolder();
+        });
+    } else {
+        // Firefox and Safari: keep the editor, drop the folder affordances
+        // rather than leaving buttons that cannot work.
+        el.folderButton.disabled = true;
+        el.folderButton.classList.add('unsupported');
+        el.pickFolder.hidden = true;
+        el.emptyOpen.hidden = true;
+        el.searchButton.hidden = true;
+    }
 
-    let getLightMarkdownCss = () => {
-        if (exportLightCssPromise) {
-            return exportLightCssPromise;
+    // ----- search -----
+
+    const palette = paletteModule.setup({
+        root: el.container,
+        input: el.searchInput,
+        results: el.searchResults,
+        search: (query) => (workspace.isFolderOpen() ? workspace.search(query) : []),
+        onOpenHit: async (hit) => {
+            await workspace.openEntry(hit.entry);
+            editor.revealLineInCenter(hit.line);
+            editor.setPosition({ lineNumber: hit.line, column: 1 });
+            editor.focus();
         }
+    });
 
-        exportLightCssPromise = fetch(PREVIEW_CSS_LIGHT)
-            .then((response) => {
-                if (!response.ok) {
-                    throw new Error(`Failed to load export CSS: ${response.status}`);
-                }
-                return response.text();
-            })
-            .catch((error) => {
-                // eslint-disable-next-line no-console
-                console.error('Failed to load light markdown CSS', error);
-                return '';
-            });
-
-        return exportLightCssPromise;
-    };
-
-    let exportPreviewToPdf = () => {
-        const previewElement = document.querySelector('#preview-wrapper');
-        if (!previewElement) {
+    el.searchButton.addEventListener('click', () => {
+        if (!workspace.isFolderOpen()) {
+            toast(t.searchNeedsFolder);
             return;
         }
+        palette.open();
+    });
 
-        if (typeof window.html2pdf !== 'function') {
-            window.alert('PDF export is not available yet. Please try again in a moment.');
+    // ----- toolbar actions -----
+
+    el.resetButton.addEventListener('click', () => {
+        if (editor.getValue() !== defaultDocument && !window.confirm(t.resetConfirm)) {
             return;
         }
+        editor.setValue(defaultDocument);
+        editor.revealPosition({ lineNumber: 1, column: 1 });
+        editor.focus();
+        el.preview.scrollTo({ top: 0 });
+    });
 
-        const restoreDarkMermaid = getMermaidTheme() === 'dark';
-
-        renderMermaidDiagrams('default').then(() => getLightMarkdownCss()).then((lightCss) => {
-            const options = {
-                margin: 10,
-                filename: 'markdown-preview.pdf',
-                image: { type: 'jpeg', quality: 0.98 },
-                html2canvas: {
-                    scale: 2,
-                    useCORS: true,
-                    onclone: (clonedDoc) => {
-                        clonedDoc.documentElement.setAttribute('data-theme', 'light');
-
-                        const markdownLink = clonedDoc.getElementById('gh-markdown-link');
-                        if (markdownLink) {
-                            markdownLink.setAttribute('href', PREVIEW_CSS_LIGHT);
-                        }
-
-                        if (lightCss) {
-                            const style = clonedDoc.createElement('style');
-                            style.id = 'export-light-css';
-                            style.textContent = `${lightCss}
-#preview-wrapper, #output, body {
-  background: #fff !important;
-  color: #24292f !important;
-}`;
-                            clonedDoc.head.appendChild(style);
-                        }
-
-                        const clonedPreview = clonedDoc.getElementById('preview-wrapper');
-                        if (clonedPreview) {
-                            clonedPreview.style.background = '#fff';
-                            clonedPreview.style.color = '#24292f';
-                            clonedPreview.style.width = '190mm';
-                            clonedPreview.style.maxWidth = '190mm';
-                        }
-
-                        const clonedOutput = clonedDoc.getElementById('output');
-                        if (clonedOutput) {
-                            clonedOutput.style.background = '#fff';
-                            clonedOutput.style.color = '#24292f';
-                            clonedOutput.style.width = '190mm';
-                            clonedOutput.style.maxWidth = '190mm';
-                        }
-                    }
-                },
-                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-            };
-
-            window.html2pdf()
-                .set(options)
-                .from(previewElement)
-                .save()
-                .catch((error) => {
-                    // eslint-disable-next-line no-console
-                    console.error('Failed to export PDF', error);
-                })
-                .finally(() => {
-                    if (restoreDarkMermaid) {
-                        renderMermaidDiagrams();
-                    }
-                });
-        });
-    };
-
-    // ----- setup -----
-
-    // setup navigation actions
-    let setupResetButton = () => {
-        document.querySelector("#reset-button").addEventListener('click', (event) => {
-            event.preventDefault();
-            reset();
-        });
-    };
-
-    let setupCopyButton = (editor) => {
-        document.querySelector("#copy-button").addEventListener('click', (event) => {
-            event.preventDefault();
-            let value = editor.getValue();
-            copyToClipboard(value, () => {
-                notifyCopied();
-            },
-                () => {
-                    // nothing to do
-                });
-        });
-    };
-
-    let setupExportButton = () => {
-        const exportButton = document.querySelector('#export-button');
-        if (!exportButton) {
-            return;
-        }
-        exportButton.addEventListener('click', (event) => {
-            event.preventDefault();
-            exportPreviewToPdf();
-        });
-    };
-
-    // ----- local state -----
-
-    let loadLastContent = () => {
-        let lastContent = Storehouse.getItem(localStorageNamespace, localStorageKey);
-        return lastContent;
-    };
-
-    let saveLastContent = (content) => {
-        let expiredAt = new Date(2099, 1, 1);
-        Storehouse.setItem(localStorageNamespace, localStorageKey, content, expiredAt);
-    };
-
-    let loadScrollBarSettings = () => {
-        let lastContent = Storehouse.getItem(localStorageNamespace, localStorageScrollBarKey);
-        return lastContent;
-    };
-
-    let loadThemeSettings = () => {
-        let last = Storehouse.getItem(localStorageNamespace, localStorageThemeKey);
-        if (last === null || last === undefined) {
-            try {
-                // fallback to raw localStorage boot key used by inline script
-                const raw = localStorage.getItem('com.markdownlivepreview_theme');
-                if (raw === 'dark') return true;
-                if (raw === 'light') return false;
-            } catch (e) {
-                // ignore
-            }
-        }
-        return last;
-    };
-
-    let saveScrollBarSettings = (settings) => {
-        let expiredAt = new Date(2099, 1, 1);
-        Storehouse.setItem(localStorageNamespace, localStorageScrollBarKey, settings, expiredAt);
-    };
-
-    let saveThemeSettings = (settings) => {
-        let expiredAt = new Date(2099, 1, 1);
-        Storehouse.setItem(localStorageNamespace, localStorageThemeKey, settings, expiredAt);
+    el.copyButton.addEventListener('click', async () => {
+        const label = el.copyButton.querySelector('.label');
         try {
-            localStorage.setItem('com.markdownlivepreview_theme', settings ? 'dark' : 'light');
-        } catch (e) {
-            // ignore storage errors
+            await navigator.clipboard.writeText(editor.getValue());
+            label.textContent = t.copied;
+        } catch (error) {
+            label.textContent = t.copyFailed;
         }
+        setTimeout(() => {
+            label.textContent = t.copy;
+        }, 1200);
+    });
+
+    el.exportButton.addEventListener('click', async () => {
+        el.exportButton.disabled = true;
+        el.exportButton.textContent = t.exporting;
+        try {
+            await toPdf({ source: el.previewWrapper, output: el.output });
+        } catch (error) {
+            console.error('导出 PDF 失败', error);
+        } finally {
+            el.exportButton.disabled = false;
+            el.exportButton.textContent = t.exportPdf;
+        }
+    });
+
+    // ----- theme -----
+
+    const syncThemeButton = (value) => {
+        const dark = value === 'dark';
+        el.themeButton.setAttribute('aria-pressed', String(dark));
+        el.themeButton.title = dark ? t.toThemeLight : t.toThemeDark;
     };
 
-    let setupDivider = () => {
-        let lastLeftRatio = 0.5;
-        const divider = document.getElementById('split-divider');
-        const leftPane = document.getElementById('edit');
-        const rightPane = document.getElementById('preview');
-        const container = document.getElementById('container');
+    theme.onChange((value) => {
+        syncThemeButton(value);
+        editorModule.setTheme(value === 'dark');
+        mermaidRenderer.renderNow(el.output, theme.mermaidTheme());
+    });
+    syncThemeButton(theme.get());
 
-        let isDragging = false;
+    el.themeButton.addEventListener('click', () => theme.toggle());
 
-        divider.addEventListener('mouseenter', () => {
-            divider.classList.add('hover');
-        });
+    // ----- layout -----
 
-        divider.addEventListener('mouseleave', () => {
-            if (!isDragging) {
-                divider.classList.remove('hover');
+    const relayout = () => editor.layout();
+
+    layout.setupSplit({ container: el.container, divider: el.divider, onResize: relayout });
+    layout.setupModes({ container: el.container, group: el.modes, onChange: relayout });
+    layout.setupRail({ container: el.container, toggle: el.railToggle, onChange: relayout });
+    layout.setupMobileTabs({ container: el.container, tabs: el.mobileTabs, onChange: relayout });
+
+    scrollSync.setup({ editor, preview: el.preview, checkbox: el.syncCheckbox });
+
+    // ----- keyboard -----
+
+    document.addEventListener('keydown', (event) => {
+        const meta = event.metaKey || event.ctrlKey;
+        if (!meta) return;
+
+        const key = event.key.toLowerCase();
+        if (key === 'k' && files.isSupported()) {
+            event.preventDefault();
+            if (workspace.isFolderOpen()) {
+                palette.open();
+            } else {
+                toast(t.searchNeedsFolder);
             }
-        });
+        } else if (key === 's') {
+            event.preventDefault();
+            workspace.flush(editor.getValue());
+        } else if (key === 'b') {
+            event.preventDefault();
+            el.railToggle.click();
+        }
+    });
 
-        divider.addEventListener('mousedown', () => {
-            isDragging = true;
-            divider.classList.add('active');
-            document.body.style.cursor = 'col-resize';
-        });
+    // ----- start -----
 
-        divider.addEventListener('dblclick', () => {
-            const containerRect = container.getBoundingClientRect();
-            const totalWidth = containerRect.width;
-            const dividerWidth = divider.offsetWidth;
-            const halfWidth = (totalWidth - dividerWidth) / 2;
+    syncFolderChrome();
 
-            leftPane.style.width = halfWidth + 'px';
-            rightPane.style.width = halfWidth + 'px';
-        });
+    // Loading the scratch buffer is not an edit, so it must not mark the
+    // document dirty or trigger a save.
+    loading = true;
+    editor.setValue(read(KEYS.content) || defaultDocument);
+    loading = false;
 
-        document.addEventListener('mousemove', (e) => {
-            if (!isDragging) return;
-            document.body.style.userSelect = 'none';
-            const containerRect = container.getBoundingClientRect();
-            const totalWidth = containerRect.width;
-            const offsetX = e.clientX - containerRect.left;
-            const dividerWidth = divider.offsetWidth;
-
-            // Prevent overlap or out-of-bounds
-            const minWidth = 100;
-            const maxWidth = totalWidth - minWidth - dividerWidth;
-            const leftWidth = Math.max(minWidth, Math.min(offsetX, maxWidth));
-            leftPane.style.width = leftWidth + 'px';
-            rightPane.style.width = (totalWidth - leftWidth - dividerWidth) + 'px';
-            lastLeftRatio = leftWidth / (totalWidth - dividerWidth);
-        });
-
-        document.addEventListener('mouseup', () => {
-            if (isDragging) {
-                isDragging = false;
-                divider.classList.remove('active');
-                divider.classList.remove('hover');
-                document.body.style.cursor = 'default';
-                document.body.style.userSelect = '';
-            }
-        });
-
-        window.addEventListener('resize', () => {
-            const containerRect = container.getBoundingClientRect();
-            const totalWidth = containerRect.width;
-            const dividerWidth = divider.offsetWidth;
-            const availableWidth = totalWidth - dividerWidth;
-
-            const newLeft = availableWidth * lastLeftRatio;
-            const newRight = availableWidth * (1 - lastLeftRatio);
-
-            leftPane.style.width = newLeft + 'px';
-            rightPane.style.width = newRight + 'px';
-        });
-    };
-
-    // ----- entry point -----
-    let lastContent = loadLastContent();
-    let editor = setupEditor();
-    if (lastContent) {
-        presetValue(lastContent);
-    } else {
-        presetValue(defaultInput);
-    }
-    setupResetButton();
-    setupCopyButton(editor);
-    setupExportButton();
-
-    let scrollBarSettings = loadScrollBarSettings() || false;
-    initScrollBarSync(scrollBarSettings);
-
-    // initialize theme (dark/light)
-    let themeSettings = loadThemeSettings();
-    // normalize to boolean (Storehouse may return string or boolean)
-    if (themeSettings === 'true' || themeSettings === true) {
-        themeSettings = true;
-    } else {
-        themeSettings = false;
-    }
-    initThemeToggle(themeSettings);
-
-    setupDivider();
+    editor.revealPosition({ lineNumber: 1, column: 1 });
+    editor.focus();
+    el.saveDot.title = t.saved;
 };
 
-window.addEventListener("load", () => {
-    init();
-});
+window.addEventListener('DOMContentLoaded', init);

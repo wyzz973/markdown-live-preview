@@ -1,37 +1,25 @@
 {
   "name": "markdown-live-preview",
-  "version": "1.0.0",
-  "description": "[Markdown Live Preview](https://markdownlivepreview.com/) is a tiny web tool to preview Markdown formatted text.",
-  "main": "index.js",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "description": "本地优先的 Markdown 编辑器：实时预览、代码高亮、Mermaid 图表，可打开本地文件夹并全文检索，断网可用。",
+  "license": "MIT",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview",
-    "serve-dist": "http-server dist -p 5001 -c-1",
-    "build-and-serve": "npm run build && npm run serve-dist"
+    "preview": "vite preview"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/tanabe/markdown-live-preview.git"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/tanabe/markdown-live-preview/issues"
-  },
-  "homepage": "https://github.com/tanabe/markdown-live-preview#readme",
   "devDependencies": {
-    "http-server": "^14.1.1",
     "vite": "^6.4.2"
   },
   "dependencies": {
-    "dompurify": "^3.4.0",
-    "github-markdown-css": "^5.8.1",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "dompurify": "^3.4.12",
+    "highlight.js": "^11.11.1",
+    "html2pdf.js": "^0.14.0",
     "marked": "^15.0.7",
     "mermaid": "^11.15.0",
-    "monaco-editor": "^0.52.2",
-    "storehouse-js": "github:tanabe/Storehouse-js"
+    "monaco-editor": "^0.52.2"
   }
 }

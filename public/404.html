@@ -1,31 +1,61 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Page Not Found</title>
-    <style media="screen">
-        html, body {
-          color: #333;
-          overflow-x: hidden;
-          margin: 0;
-          padding: 0;
-          font-family: Helvetica, arial, freesans, clean, sans-serif;
-          font-size: 1em;
-          line-height: 1.5em;
-          background-color: #fff;
-          overscroll-behavior-y: none;
+    <meta name="color-scheme" content="light dark">
+    <title>页面不存在 — Markdown 预览</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --paper: #ffffff;
+        --ink: #14181d;
+        --ink-soft: #5c6771;
+        --focus: #0969da;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          color-scheme: dark;
+          --paper: #22272e;
+          --ink: #c9d3dd;
+          --ink-soft: #7a858f;
+          --focus: #539bf5;
         }
-        #message {
-            text-align: center;
-        }
+      }
+
+      html, body {
+        height: 100%;
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font: 400 14px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas,
+              'PingFang SC', 'Microsoft YaHei', monospace;
+      }
+
+      main {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: flex-start;
+        gap: 10px;
+        max-width: 32em;
+        margin: 0 auto;
+        padding: 24px;
+      }
+
+      h1 { margin: 0; font-size: 15px; font-weight: 600; }
+      p { margin: 0; color: var(--ink-soft); }
+      a { color: var(--focus); }
     </style>
   </head>
+
   <body>
-    <div id="message">
-      <h1>404</h1>
-      <h2>File not found</h2>
-      <a href="/">back to root page</a>
-    </div>
+    <main>
+      <h1>404 — 页面不存在</h1>
+      <p>这个地址没有对应的内容。你写的东西还在浏览器本地，没有丢。</p>
+      <p><a href="/">回到编辑器</a></p>
+    </main>
   </body>
 </html>
