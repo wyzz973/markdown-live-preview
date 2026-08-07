@@ -12,7 +12,7 @@ import { formatSize } from './files.js';
 const INDENT_PER_LEVEL = 9;
 const BASE_INDENT = 8;
 
-export const setup = ({ container, countLabel, preview, output, onOpenFile }) => {
+export const setup = ({ container, countLabel, preview, output, onOpenFile, onNavigate }) => {
     let headings = [];
     let headingRows = [];
     let files = [];
@@ -23,7 +23,16 @@ export const setup = ({ container, countLabel, preview, output, onOpenFile }) =>
         headingRows.forEach((r) => r.classList.toggle('active', r === row));
     };
 
+    // Markdown scrolls the preview to the heading and marks it; JSON has no
+    // preview anchor and reveals the line in the editor instead. The rail does
+    // not need to know which — the active tool supplies the behaviour.
     const jumpTo = (heading, row) => {
+        setActiveHeading(row);
+
+        if (onNavigate?.(heading) !== false) {
+            return;
+        }
+
         const target = output.querySelector(`#${CSS.escape(heading.id)}`);
         if (!target) {
             return;
@@ -40,10 +49,12 @@ export const setup = ({ container, countLabel, preview, output, onOpenFile }) =>
         // Force a reflow so the animation restarts on a repeat click.
         void target.offsetWidth;
         target.classList.add('jump-flash');
-
-        setActiveHeading(row);
     };
 
+    // The left column always speaks the notation of the format being edited:
+    // Markdown draws depth in its own hashes, JSON in its own braces and
+    // brackets. Both list only what is navigable — headings, containers — and
+    // never the leaves, which would bury the structure they are meant to show.
     const buildHeadingRows = () => {
         headingRows = headings.map((heading) => {
             const row = document.createElement('button');
@@ -51,16 +62,25 @@ export const setup = ({ container, countLabel, preview, output, onOpenFile }) =>
             row.className = 'head-row';
             row.style.paddingLeft = `${BASE_INDENT + (heading.level - 1) * INDENT_PER_LEVEL}px`;
 
-            const hashes = document.createElement('span');
-            hashes.className = 'hashes';
-            hashes.setAttribute('aria-hidden', 'true');
-            hashes.textContent = '#'.repeat(heading.level);
+            const token = document.createElement('span');
+            token.className = 'hashes';
+            token.setAttribute('aria-hidden', 'true');
+            token.textContent = heading.token ?? '#'.repeat(heading.level);
 
             const label = document.createElement('span');
             label.className = 'label';
             label.textContent = heading.text;
 
-            row.append(hashes, label);
+            row.append(token, label);
+
+            if (heading.count !== undefined) {
+                const count = document.createElement('span');
+                count.className = 'meta';
+                count.textContent =
+                    heading.unit === 'items' ? t.items(heading.count) : t.keys(heading.count);
+                row.appendChild(count);
+            }
+
             row.title = heading.text;
             row.addEventListener('click', () => jumpTo(heading, row));
             return row;
@@ -110,10 +130,13 @@ export const setup = ({ container, countLabel, preview, output, onOpenFile }) =>
         // With a folder open the headline number is how many documents it
         // holds; the per-file heading count is implicit in the tree below.
         // Both live here so the two never race to write the same label.
+        // "标题" belongs to Markdown; a JSON outline counts containers. The
+        // outline rows carry their own notation, so read it off them.
+        const isMarkdown = headings.length === 0 || headings[0].token === undefined;
         countLabel.textContent = files.length
             ? t.fileCount(files.length)
             : headings.length
-              ? t.headingCount(headings.length)
+              ? (isMarkdown ? t.headingCount : t.nodeCount)(headings.length)
               : '';
 
         // No folder open: the rail is just the outline of the scratch buffer.
@@ -154,7 +177,9 @@ export const setup = ({ container, countLabel, preview, output, onOpenFile }) =>
 
     // Highlight whichever heading the reader is currently under.
     const syncActive = () => {
-        if (headingRows.length === 0) {
+        // Only meaningful when the outline points at anchors in the preview —
+        // a JSON outline points at editor lines and has nothing to follow here.
+        if (headingRows.length === 0 || !headings[0]?.id) {
             return;
         }
 

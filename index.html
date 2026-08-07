@@ -3,9 +3,9 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="本地优先的 Markdown 编辑器，实时预览、代码高亮、Mermaid 图表，断网也能用。">
+    <meta name="description" content="本地优先的开发者工具站：Markdown 预览、JSON 处理、大模型流式响应还原、Unicode 转换，断网也能用。">
     <meta name="color-scheme" content="light dark">
-    <title>Markdown 预览</title>
+    <title>工具站</title>
     <link rel="icon" type="image/png" href="/favicon.png">
 
     <script>
@@ -41,10 +41,19 @@
       </button>
 
       <div class="path">
-        <span class="brand" data-i18n="appName"></span>
-        <span class="sep">/</span>
+        <button type="button" class="tool-btn" id="tool-button"
+                aria-haspopup="menu" aria-expanded="false">
+          <span id="tool-name"></span>
+          <svg class="chev" width="9" height="9" viewBox="0 0 10 10" aria-hidden="true">
+            <path d="M2 4l3 3 3-3" stroke="currentColor" stroke-width="1.4"
+                  fill="none" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <span class="sep" id="doc-sep">/</span>
         <span class="doc-title" id="doc-title"></span>
         <span class="dot" id="save-dot"></span>
+
+        <div class="tool-menu" id="tool-menu" role="menu" hidden></div>
       </div>
 
       <div class="bar-right">
@@ -141,7 +150,10 @@
         <div id="preview-wrapper">
           <article id="output" class="markdown-body"></article>
         </div>
+        <div id="json-panel-host"></div>
       </section>
+
+      <div id="utility-host"></div>
 
       <div class="scrim" id="scrim">
         <div class="palette" role="dialog" aria-modal="true">

@@ -24,7 +24,14 @@ const TOOLS = [
     { label: '|', title: () => t.tools.table, block: () => t.tableTemplate }
 ];
 
-export const setup = ({ container, editor }) => {
+// JSON gets its own actions: Markdown's `**` and `>` mean nothing here, and
+// the things you actually reach for — reformat, minify, repair, and the
+// Unicode round-trip Chinese payloads force on you — have no equivalent in the
+// Markdown set. Labels are words rather than syntax because JSON's operations
+// are transforms of the whole document, not characters you insert.
+const jsonAction = (run) => ({ run });
+
+export const setup = ({ container, editor, jsonOps }) => {
     const model = () => editor.getModel();
 
     const applyEdit = (range, text) => {
@@ -81,11 +88,14 @@ export const setup = ({ container, editor }) => {
 
     container.setAttribute('aria-label', t.toolbarLabel);
 
+    const markdownButtons = document.createElement('div');
+    markdownButtons.className = 'toolbar-set';
+
     TOOLS.forEach((tool) => {
         if (tool.rule) {
             const rule = document.createElement('span');
             rule.className = 'rule';
-            container.appendChild(rule);
+            markdownButtons.appendChild(rule);
             return;
         }
 
@@ -95,6 +105,68 @@ export const setup = ({ container, editor }) => {
         button.title = tool.title();
         button.setAttribute('aria-label', tool.title());
         button.addEventListener('click', () => applyTool(tool));
-        container.appendChild(button);
+        markdownButtons.appendChild(button);
     });
+
+    // ----- JSON actions -----
+
+    const replaceAll = (text) => {
+        const doc = model();
+        editor.executeEdits('json-tool', [{ range: doc.getFullModelRange(), text }]);
+        editor.focus();
+    };
+
+    // Every action reads the buffer, transforms it, writes it back. A failure
+    // leaves the document untouched and says why rather than silently doing
+    // nothing.
+    const transform = (fn) => () => {
+        try {
+            const next = fn(editor.getValue());
+            if (typeof next === 'string') {
+                replaceAll(next);
+            }
+        } catch (error) {
+            jsonOps?.onError?.(error);
+        }
+    };
+
+    const JSON_ACTIONS = [
+        { label: t.jsonFormat, run: transform((text) => jsonOps.format(text)) },
+        { label: t.jsonMinify, run: transform((text) => jsonOps.minify(text)) },
+        { label: t.jsonRepair, run: transform((text) => jsonOps.repair(text)) },
+        { label: t.jsonSort, run: transform((text) => jsonOps.sort(text)) },
+        { rule: true },
+        { label: t.jsonEscape, run: transform((text) => jsonOps.escape(text)) },
+        { label: t.jsonUnescape, run: transform((text) => jsonOps.unescape(text)) },
+        { rule: true },
+        { label: t.jsonToChinese, run: transform((text) => jsonOps.toChinese(text)) },
+        { label: t.jsonToUnicode, run: transform((text) => jsonOps.toUnicode(text)) }
+    ];
+
+    const jsonButtons = document.createElement('div');
+    jsonButtons.className = 'toolbar-set toolbar-words';
+    jsonButtons.hidden = true;
+
+    JSON_ACTIONS.forEach((action) => {
+        if (action.rule) {
+            const rule = document.createElement('span');
+            rule.className = 'rule';
+            jsonButtons.appendChild(rule);
+            return;
+        }
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = action.label;
+        button.addEventListener('click', action.run);
+        jsonButtons.appendChild(button);
+    });
+
+    container.append(markdownButtons, jsonButtons);
+
+    return {
+        setDocType(type) {
+            markdownButtons.hidden = type !== 'markdown';
+            jsonButtons.hidden = type !== 'json';
+        }
+    };
 };

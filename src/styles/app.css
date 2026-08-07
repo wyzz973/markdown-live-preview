@@ -525,12 +525,399 @@ body.is-resizing { user-select: none; cursor: col-resize; }
 
 .toolbar button:hover { background: var(--wash); color: var(--ink); }
 
+.toolbar-set { display: flex; align-items: center; gap: 2px; }
+
+/* JSON's actions transform the whole document rather than inserting
+   characters, so they are named in words instead of wearing syntax. */
+.toolbar-words button { font-family: var(--ui); }
+
 .toolbar .rule {
   flex: none;
   width: 1px;
   height: 13px;
   margin: 0 6px;
   background: var(--edge);
+}
+
+/* ---------- tool switcher ----------
+   Typographic, not iconographic. This design's vocabulary is text and syntax
+   marks — the toolbar wears its syntax, the outline wears its hashes — so an
+   icon rail would import a visual language the app does not otherwise speak. */
+
+.path { position: relative; }
+
+.tool-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: -3px -6px;
+  padding: 3px 6px;
+  border-radius: var(--radius);
+  color: var(--ink);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tool-btn:hover { background: var(--galley-sub); }
+.tool-btn[aria-expanded='true'] { background: var(--wash); }
+.tool-btn .chev { flex: none; color: var(--ink-faint); }
+.tool-btn[aria-expanded='true'] .chev { transform: rotate(180deg); }
+
+.tool-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: -6px;
+  z-index: 25;
+  width: 244px;
+  padding: 5px;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: var(--galley);
+  box-shadow: 0 12px 28px -12px rgba(0, 0, 0, 0.45);
+}
+
+.tool-item {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  text-align: left;
+  color: var(--ink-soft);
+}
+
+.tool-item:hover { background: var(--galley-sub); }
+.tool-item[aria-current='true'] { background: var(--wash); }
+.tool-item .n { display: block; color: var(--ink); font-size: 12.5px; font-weight: 500; }
+.tool-item .h { display: block; margin-top: 1px; color: var(--ink-faint); font-size: 11px; }
+
+/* ---------- utility workbench ----------
+   The document skeleton with the rail removed: same divider, same mono, same
+   surfaces, so the two workbenches read as one product. */
+
+#utility-host {
+  display: none;
+  flex: 1;
+  min-width: 0;
+}
+
+#container[data-workbench='utility'] #utility-host { display: flex; }
+
+#container[data-workbench='utility'] .rail,
+#container[data-workbench='utility'] #edit,
+#container[data-workbench='utility'] #preview,
+#container[data-workbench='utility'] #split-divider { display: none; }
+
+.utility { display: flex; flex: 1; min-width: 0; }
+
+.utility-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--paper);
+}
+
+/* The raw capture is noise you scan; the reassembled answer is the payoff, so
+   the split leans toward the output. */
+.utility-input {
+  flex: 0 0 38%;
+  border-right: 1px solid var(--edge);
+}
+
+.utility-output { flex: 1 1 0; }
+
+.utility-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 33px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--edge);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.utility-bar::-webkit-scrollbar { display: none; }
+
+.utility-label {
+  margin-right: auto;
+  color: var(--ink-faint);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+}
+
+button.ghost {
+  flex: none;
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  color: var(--ink-soft);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+button.ghost:hover { background: var(--galley-sub); color: var(--ink); }
+button.ghost.active { background: var(--wash); color: var(--ink); font-weight: 500; }
+
+.utility-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 6px;
+  color: var(--ink-faint);
+  font-size: 11.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.utility-switch input { margin: 0; accent-color: var(--focus); }
+
+.utility-textarea {
+  flex: 1;
+  min-height: 0;
+  padding: 12px 14px;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--ink);
+  font: 400 12.5px/1.7 var(--ui);
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.utility-textarea::placeholder { color: var(--ink-faint); }
+
+.utility-tabs { gap: 2px; }
+
+.utility-tab {
+  flex: none;
+  padding: 4px 9px;
+  border-radius: var(--radius);
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.utility-tab:hover { background: var(--galley-sub); color: var(--ink); }
+.utility-tab.active { background: var(--wash); color: var(--ink); font-weight: 500; }
+.utility-tabs .ghost { margin-left: auto; }
+
+/* An empty tab stays visible but dimmed, and each carries its count — so the
+   tab strip itself says what the response contained without a single click. */
+.utility-tab:disabled { color: var(--ink-faint); cursor: default; }
+.utility-tab:disabled:hover { background: transparent; }
+.utility-tab .tab-count {
+  margin-left: 5px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+.utility-tab.active .tab-count { color: var(--ink-soft); }
+
+.utility-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 16px 32px;
+}
+
+.utility-markdown { max-width: 720px; }
+
+.utility-empty {
+  margin: 0;
+  padding: 24px 4px;
+  color: var(--ink-faint);
+  font-size: 12px;
+  line-height: 1.8;
+}
+
+/* The status strip earns its place here, unlike in the Markdown editor: it
+   carries the detection result, which is this tool's primary answer. */
+.utility-status {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 7px 10px;
+  border-top: 1px solid var(--edge);
+  background: var(--galley);
+}
+
+.chip {
+  padding: 1px 7px;
+  border-radius: 3px;
+  background: var(--galley-sub);
+  color: var(--ink-soft);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.chip-strong { background: var(--wash); color: var(--ink); font-weight: 500; }
+.chip-warn { color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink-faint); }
+.chip-bad { color: var(--query); box-shadow: inset 0 0 0 1px var(--query); }
+
+/* ---------- tool calls & events ---------- */
+
+.tool-call {
+  margin-bottom: 12px;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.tool-call-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--galley);
+  border-bottom: 1px solid var(--edge);
+}
+
+.tool-call-name { color: var(--ink); font-weight: 600; font-size: 12.5px; }
+.tool-call-id { color: var(--ink-faint); font-size: 11px; }
+
+.tool-call pre {
+  margin: 0;
+  padding: 10px;
+  overflow-x: auto;
+  font: 400 12px/1.6 var(--mono);
+  color: var(--ink);
+}
+
+.event-list { display: flex; flex-direction: column; }
+
+.event-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 4px;
+  border-bottom: 1px solid var(--edge);
+  font-size: 11.5px;
+}
+
+.event-index {
+  flex: none;
+  width: 3ch;
+  text-align: right;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Event kinds are told apart by their mono label, not by colour — the palette
+   keeps one wash and one red, and red means something is wrong. */
+.event-kind {
+  flex: none;
+  width: 9ch;
+  color: var(--ink-soft);
+  font-family: var(--mono);
+}
+
+.event-error .event-kind { color: var(--query); }
+
+.event-detail {
+  min-width: 0;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-other .event-detail, .event-usage .event-detail { color: var(--ink-faint); }
+
+/* ---------- JSON panel ---------- */
+
+#json-panel-host { display: none; height: 100%; }
+
+#container[data-doctype='json'] #preview-wrapper { display: none; }
+#container[data-doctype='json'] #json-panel-host { display: block; }
+
+.json-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.json-modes {
+  flex: none;
+  display: flex;
+  gap: 2px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--edge);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.json-modes::-webkit-scrollbar { display: none; }
+
+.json-mode {
+  flex: none;
+  padding: 4px 9px;
+  border-radius: var(--radius);
+  color: var(--ink-soft);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.json-mode:hover { background: var(--galley-sub); color: var(--ink); }
+.json-mode.active { background: var(--wash); color: var(--ink); font-weight: 500; }
+
+.json-query {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--edge);
+}
+
+.json-query input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  outline: none;
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 12.5px var(--ui);
+}
+
+.json-query input:focus { border-color: var(--focus); }
+.json-query input::placeholder { color: var(--ink-faint); }
+.json-query-count { flex: none; color: var(--ink-faint); font-size: 11.5px; white-space: nowrap; }
+
+.json-note {
+  flex: none;
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--ink-soft);
+  font-size: 11.5px;
+  line-height: 1.7;
+}
+
+.json-note-good { color: var(--ink-faint); }
+.json-note-warn { color: var(--ink); }
+.json-note-bad { color: var(--query); }
+
+.json-output {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0 12px 24px;
+  overflow: auto;
+  font: 400 12.5px/1.65 var(--mono);
+  color: var(--ink);
+  white-space: pre;
+}
+
+.json-actions {
+  flex: none;
+  display: flex;
+  gap: 4px;
+  padding: 7px 10px;
+  border-top: 1px solid var(--edge);
+  background: var(--galley);
 }
 
 /* ---------- search ----------
@@ -834,6 +1221,13 @@ body.is-resizing { user-select: none; cursor: col-resize; }
 
   #container[data-mobile-view='edit'] #preview,
   #container[data-mobile-view='preview'] #edit { display: none; }
+
+  /* The utility workbench folds into the same tab model rather than inventing
+     a second one: input and output take turns instead of splitting 390px. */
+  .utility { flex-direction: column; }
+  .utility-input, .utility-output { flex: 1 1 auto; border-right: none; }
+  #container[data-mobile-view='edit'] .utility-output,
+  #container[data-mobile-view='preview'] .utility-input { display: none; }
 
   #container[data-mode='read'] #preview-wrapper { padding-top: 16px; }
   #preview-wrapper { padding: 14px 16px 56px; }

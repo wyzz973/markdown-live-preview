@@ -47,10 +47,18 @@ export const create = ({ onFilesChanged, onFileOpened, onDirtyChanged, onError }
         }
     }, DISK_SAVE_DELAY);
 
+    // Each document tool keeps its own scratch buffer. Sharing one would mean
+    // switching to the JSON tool hands it whatever Markdown you were writing
+    // and reports it as broken JSON.
+    let scratchKind = 'markdown';
+    const scratchKey = (kind) => `${KEYS.content}:${kind}`;
+
     const saveScratch = debounce((text) => {
-        write(KEYS.content, text);
+        write(scratchKey(scratchKind), text);
         setDirty(false);
     }, SCRATCH_SAVE_DELAY);
+
+    const readScratch = (kind) => read(scratchKey(kind), null);
 
     const recordEdit = (text) => {
         setDirty(true);
@@ -141,7 +149,7 @@ export const create = ({ onFilesChanged, onFileOpened, onDirtyChanged, onError }
         current = null;
         index.clear();
         onFilesChanged(entries);
-        onFileOpened({ entry: null, text: scratchText ?? read(KEYS.content) ?? null });
+        onFileOpened({ entry: null, text: scratchText ?? readScratch(scratchKind) ?? null });
         setDirty(false);
     };
 
@@ -164,9 +172,23 @@ export const create = ({ onFilesChanged, onFileOpened, onDirtyChanged, onError }
                 saveToDisk.flush();
             } else {
                 saveScratch.cancel();
-                write(KEYS.content, text);
+                write(scratchKey(scratchKind), text);
                 setDirty(false);
             }
-        }
+        },
+
+        // Switch which scratch buffer is live, persisting the outgoing one
+        // first. Returns the incoming buffer's text.
+        switchScratch: (kind, currentText, fallback) => {
+            if (!current) {
+                saveScratch.cancel();
+                write(scratchKey(scratchKind), currentText);
+            }
+            scratchKind = kind;
+            setDirty(false);
+            return readScratch(kind) ?? fallback;
+        },
+
+        scratchKind: () => scratchKind
     };
 };

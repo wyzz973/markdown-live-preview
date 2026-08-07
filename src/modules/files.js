@@ -6,7 +6,11 @@
 
 import { putRecord, deleteRecord, allRecords } from './idb.js';
 
-const MARKDOWN = /\.(md|markdown|mdown|mkd)$/i;
+// Driven by the tool registry so a new document tool's extensions are picked
+// up here without a second list to keep in sync.
+import { documentExtensions } from './tools.js';
+
+const DOCUMENT_FILE = new RegExp(`\\.(${documentExtensions().join('|')})$`, 'i');
 const SKIP_DIRECTORIES = new Set(['node_modules', '.git', '.obsidian', '.trash', 'dist', 'build']);
 const MAX_DEPTH = 6;
 const MAX_FILES = 2000;
@@ -57,7 +61,7 @@ const walk = async (directory, prefix, depth, collected) => {
         }
 
         if (entry.kind === 'file') {
-            if (!MARKDOWN.test(entry.name)) {
+            if (!DOCUMENT_FILE.test(entry.name)) {
                 continue;
             }
             collected.push({

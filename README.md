@@ -1,14 +1,49 @@
-# Markdown 预览
+# 工具站
 
-本地优先的 Markdown 编辑器。全部在浏览器里跑，不需要账号，不发任何网络请求，断网可用。
+本地优先的开发者工具站。全部在浏览器里跑，不需要账号，不发任何网络请求，断网可用。
+
+## 工具
+
+| 工具 | 工作台 | 能做什么 |
+| --- | --- | --- |
+| **Markdown** | 文档型 | 实时预览、大纲、导出 PDF |
+| **JSON** | 文档型 | 格式化、校验、修复、JSONPath 查询、转 YAML/CSV/Markdown 表格/TypeScript/Go |
+| **流式响应还原** | 工具型 | 把大模型的 SSE / JSONL 抓包还原成完整回复，按 Markdown 渲染 |
+| **Unicode 转换** | 工具型 | 中文与 `\uXXXX` 互转 |
+
+两种工作台共用一副骨架：文档型是 `侧栏 │ 编辑 │ 预览`，工具型是 `输入 │ 输出`。
+新增工具是往 `src/modules/tools.js` 里加一项加它自己的模块，不动导航。
+
+### 流式响应还原
+
+这一条是这个站独有的。现有工具只被动展示 SSE 抓包，没有一个把它**还原**成消息本身；
+而还原出来的东西几乎总是 Markdown——本站正好有一流的 Markdown 渲染器。
+
+- 自动识别 Anthropic / OpenAI / Gemini / Ollama 的流式格式，以及 SSE 与 JSONL 两种分帧
+- 把 `delta` 拼回完整正文与思考内容
+- **重组工具调用参数**：OpenAI 与 Anthropic 都把 `arguments` 当字符串碎片跨帧下发，拼起来才是合法 JSON
+- 提取 token 用量（Anthropic 的计数是累计值，取最大而非求和）
+- 流被截断时用 `jsonrepair` 补全，并如实标注"流被截断""修复 N 帧"
+- 还原出的正文可以一键送进 Markdown 工具继续编辑
+
+### JSON
+
+编辑体验直接用 Monaco 自带的 JSON 语言服务（schema 校验、精确到字符的错误定位、折叠、补全），
+所以本项目只写它没有的部分：结构大纲、转换、转义，以及 **Unicode ↔ 中文**——
+国内 API 大量返回 `\uXXXX` 转义，西方工具普遍没有这个功能。
+
+预览区刻意不做树视图：Monaco 已经折叠和着色，侧栏已经给出结构，第三份同样的树不产生新信息。
+那一栏改做**查询与转换**。
 
 - Monaco 编辑器，Markdown 语法高亮
 - 实时预览，沿用 GitHub Markdown 样式，明暗双主题
 - 代码块语法高亮（highlight.js，按需注册 35 种语言）
 - Mermaid 图表（按需加载）
-- 打开本地文件夹，浏览、编辑、全文检索里面的 Markdown 文档（`⌘K`）
+## 其余能力
+
+- 打开本地文件夹，浏览、编辑、全文检索里面的 Markdown 与 JSON 文档（`⌘K`）
 - 最近打开的文件夹记在 IndexedDB 里，下次一次授权即可恢复
-- 侧栏一栏到底：文件树与当前文档的标题树连成同一棵，标题深度用文档自己的井号绘制
+- 侧栏一栏到底：文件树与当前文档的结构树连成同一棵。**左列说的是当前格式自己的记号**——Markdown 画 `#` `##` `###`，JSON 画 `{}` `[]`；两者都只列可导航的结构（标题 / 容器），不列叶子
 - 语法工具栏：按钮以其插入的语法为标签
 - 编辑 / 分栏 / 阅读 三种视图，可拖动分隔条，窄屏切换为标签页
 - 导出 PDF
@@ -50,7 +85,14 @@ npm run preview   # 本地预览构建产物
 index.html                 页面骨架 + 首屏前的主题引导脚本
 src/main.js                装配
 src/default-document.js    初始文档
+src/tools/
+  json-tool.js             JSON 预览面板：查询与转换
+  stream-tool.js           流式响应还原
+  unicode-tool.js          Unicode 互转
 src/modules/
+  tools.js                 工具注册表与文件类型归属
+  json-tools.js            JSON 变换、结构扫描、类型生成
+  stream-parse.js          SSE / JSONL 分帧与各厂商 delta 提取
   strings.js               全部界面文案
   editor.js                Monaco 配置
   renderer.js              Markdown → 净化后的 HTML

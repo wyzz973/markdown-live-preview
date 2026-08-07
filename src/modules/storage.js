@@ -39,7 +39,8 @@ export const KEYS = {
     theme: 'theme',
     splitRatio: 'split-ratio',
     viewMode: 'view-mode',
-    railOpen: 'rail-open'
+    railOpen: 'rail-open',
+    activeTool: 'active-tool'
 };
 
 // Read the persisted theme without pulling in the rest of the app. Used by the

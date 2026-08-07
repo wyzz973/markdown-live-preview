@@ -8,13 +8,33 @@
 
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import 'monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution';
+// Monaco ships a full JSON language service: schema-aware validation with
+// character-precise error positions, formatting, folding and completion. It
+// runs in its own worker, so it costs nothing until a JSON file is opened.
+import 'monaco-editor/esm/vs/language/json/monaco.contribution';
 import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
+import JsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
 
-// With a real worker the editor no longer needs the stub Proxy the old code
+// With real workers the editor no longer needs the stub Proxy the old code
 // installed to suppress worker loading.
 self.MonacoEnvironment = {
-    getWorker: () => new EditorWorker()
+    getWorker: (_, label) => (label === 'json' ? new JsonWorker() : new EditorWorker())
 };
+
+monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
+    validate: true,
+    allowComments: true,
+    schemaValidation: 'warning'
+});
+
+export const setLanguage = (editor, language) => {
+    const model = editor.getModel();
+    if (model && model.getLanguageId() !== language) {
+        monaco.editor.setModelLanguage(model, language);
+    }
+};
+
+export const format = (editor) => editor.getAction('editor.action.formatDocument')?.run();
 
 // Latin and the Markdown syntax marks render in Plex Mono; Chinese falls
 // through to the platform face per character. Monaco measures CJK glyphs as

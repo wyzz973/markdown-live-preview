@@ -98,3 +98,23 @@ ${fence}
 
 写完的内容会自动存在浏览器本地，刷新不会丢。
 `;
+
+// The JSON tool's starter buffer: a shape that exercises the outline (nested
+// objects, an array of records), the table conversion, and Unicode escapes —
+// the three things people reach for first.
+export const defaultJson = `{
+  "服务": {
+    "主机": "localhost",
+    "端口": 8080,
+    "调试": true
+  },
+  "插件": ["vite", "monaco", "mermaid"],
+  "用户": [
+    { "名字": "甲", "年龄": 30, "城市": "北京" },
+    { "名字": "乙", "年龄": 25, "城市": "上海" },
+    { "名字": "丙", "年龄": 41, "城市": "广州" }
+  ],
+  "转义示例": "\\u4e2d\\u6587\\u6d4b\\u8bd5",
+  "空值": null
+}
+`;
