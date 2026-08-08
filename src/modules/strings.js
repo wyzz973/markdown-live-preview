@@ -40,6 +40,7 @@ export const t = {
     requestNoTools: '这个请求没有带工具定义。',
     requestNoSystem: '这个请求没有 system 提示词。',
     requestNoTurns: '这个请求里没有对话轮次。',
+    requestIsResponse: '这看起来是一份响应，不是请求。整段响应用「流式响应还原」工具看。',
     requestTurn: (n) => `第 ${n} 轮`,
     requestTurns: (n) => `${n} 轮`,
     requestToolCount: (n) => `${n} 个工具`,

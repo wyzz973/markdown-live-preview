@@ -157,6 +157,16 @@ const detect = (body) => {
     return messages.length ? 'openai' : 'unknown';
 };
 
+// Pasting the response into the request tool is the obvious slip, and
+// "unrecognised request body" is a true but unhelpful answer to it. These are
+// the completed-response shapes of the same four APIs.
+const looksLikeResponse = (body) =>
+    (body?.type === 'message' && body?.role === 'assistant') ||
+    body?.object === 'chat.completion' ||
+    Array.isArray(body?.choices) ||
+    Array.isArray(body?.candidates) ||
+    (body?.done !== undefined && body?.message?.role !== undefined);
+
 const LABELS = {
     anthropic: 'Anthropic Messages',
     openai: 'OpenAI Chat',
@@ -423,31 +433,62 @@ const EMPTY = {
     empty: true
 };
 
+const tryJson = (text) => {
+    try {
+        return { ok: true, value: JSON.parse(text) };
+    } catch (error) {
+        return { ok: false, error };
+    }
+};
+
 export const parseRequest = (source) => {
     const raw = (source ?? '').trim();
     if (!raw) return { ...EMPTY };
 
-    const fromCurl = /^\s*curl[\s\\]/.test(raw) || /--data(-raw|-binary|-ascii)?\s/.test(raw);
-    const payload = fromCurl ? (extractCurlBody(raw) ?? raw) : raw;
-
-    let body;
+    // Order matters. Sniffing for a --data flag before trying to parse meant a
+    // perfectly valid request whose prompt happened to mention `curl --data`
+    // had a fragment of its own prompt pulled out and shown as the request
+    // body: wrong content, and no error to say so. A payload that parses is
+    // the payload; only when it does not is there anything to unwrap.
+    let parsed = tryJson(raw);
+    let fromCurl = false;
     let repaired = false;
-    try {
-        body = JSON.parse(payload);
-    } catch (error) {
-        try {
-            body = JSON.parse(jsonrepair(payload));
-            repaired = true;
-        } catch (second) {
-            return { ...EMPTY, empty: false, error: error.message, fromCurl };
+    let payload = raw;
+
+    if (!parsed.ok) {
+        const extracted = extractCurlBody(raw);
+        if (extracted !== null && extracted !== raw) {
+            fromCurl = true;
+            payload = extracted;
+            parsed = tryJson(extracted);
         }
     }
+
+    if (!parsed.ok) {
+        // jsonrepair throws on input it cannot make sense of, so it needs its
+        // own guard before the result reaches the parser.
+        let mended = null;
+        try {
+            mended = jsonrepair(payload);
+        } catch (error) {
+            // Beyond repair; the original parse error is the useful one.
+        }
+        const repair = mended === null ? { ok: false } : tryJson(mended);
+        if (!repair.ok) {
+            return { ...EMPTY, empty: false, error: parsed.error.message, fromCurl };
+        }
+        parsed = repair;
+        repaired = true;
+    }
+
+    const body = parsed.value;
 
     if (body === null || typeof body !== 'object') {
         return { ...EMPTY, empty: false, error: t.requestNotAnObject, fromCurl };
     }
 
     const provider = detect(body);
+    const isResponse = provider === 'unknown' && looksLikeResponse(body);
 
     const rawTurns =
         provider === 'gemini'
@@ -476,12 +517,20 @@ export const parseRequest = (source) => {
         system.push(...geminiBlocks(body.systemInstruction.parts));
     }
 
-    const turns = rawTurns.filter((turn) => {
-        if (system.length === 0 && ['system', 'developer'].includes(turn.role)) {
+    // Only the leading run, and all of it. Hoisting just the first left a second
+    // system message sitting at turn 1 with the 系统 tab claiming to hold the
+    // lot; hoisting one that appears mid-conversation renumbered every turn
+    // after it and erased the fact that it was ever there. A system prompt is
+    // what comes before the conversation — anything later is part of it.
+    const turns = [];
+    let leading = system.length === 0;
+    rawTurns.forEach((turn) => {
+        if (leading && ['system', 'developer'].includes(turn.role)) {
             system.push(...turn.blocks);
-            return false;
+            return;
         }
-        return true;
+        leading = false;
+        turns.push(turn);
     });
 
     turns.forEach((turn, index) => {
@@ -528,6 +577,7 @@ export const parseRequest = (source) => {
         error: null,
         repaired,
         fromCurl,
+        isResponse,
         empty: false
     };
 };

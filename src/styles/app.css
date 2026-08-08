@@ -786,13 +786,19 @@ button.ghost.active { background: var(--wash); color: var(--ink); font-weight: 5
   background: var(--galley);
 }
 
+/* Capped because a chip carries whatever a payload put in it: a request with
+   thirty stop sequences produced a single 2500px chip and pushed the whole
+   overview into horizontal scroll. The full value stays in the title. */
 .chip {
+  max-width: 100%;
   padding: 1px 7px;
   border-radius: 3px;
   background: var(--galley-sub);
   color: var(--ink-soft);
   font-size: 11px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .chip-strong { background: var(--wash); color: var(--ink); font-weight: 500; }

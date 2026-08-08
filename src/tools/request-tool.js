@@ -263,6 +263,7 @@ export const create = ({ onOpenInMarkdown }) => {
     const paintOverview = () => {
         if (result.empty) return [emptyNote(t.requestEmpty)];
         if (result.error) return [emptyNote(t.requestBad(result.error))];
+        if (result.isResponse) return [emptyNote(t.requestIsResponse)];
 
         const nodes = [];
 
@@ -270,9 +271,11 @@ export const create = ({ onOpenInMarkdown }) => {
             const params = document.createElement('div');
             params.className = 'req-params';
             if (result.model) params.appendChild(chip(result.model, 'strong'));
-            result.params.forEach((param) =>
-                params.appendChild(chip(`${param.key} ${param.value}`))
-            );
+            result.params.forEach((param) => {
+                const text = `${param.key} ${param.value}`;
+                // The chip clips; the tooltip carries the rest.
+                params.appendChild(chip(text, undefined, text));
+            });
             nodes.push(params);
         }
 
@@ -427,6 +430,7 @@ export const create = ({ onOpenInMarkdown }) => {
     const paintConversation = () => {
         if (result.empty) return [emptyNote(t.requestEmpty)];
         if (result.error) return [emptyNote(t.requestBad(result.error))];
+        if (result.isResponse) return [emptyNote(t.requestIsResponse)];
         if (result.turns.length === 0) return [emptyNote(t.requestNoTurns)];
 
         return result.turns.map((turn) => {
@@ -548,6 +552,11 @@ export const create = ({ onOpenInMarkdown }) => {
 
         if (result.error) {
             status.appendChild(chip(t.requestBad(result.error), 'bad'));
+            return;
+        }
+
+        if (result.isResponse) {
+            status.appendChild(chip(t.requestIsResponse, 'warn'));
             return;
         }
 

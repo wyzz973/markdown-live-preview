@@ -8,6 +8,7 @@
 
 import * as editorModule from '../modules/editor.js';
 import { diff as structuralDiff, preview } from '../modules/json-diff.js';
+import { debounce } from '../modules/storage.js';
 import { t } from '../modules/strings.js';
 
 const SAMPLE_LEFT = `{
@@ -46,7 +47,11 @@ const parse = (text) => {
 
 export const create = () => {
     let activeTab = 'side';
-    let ignoreWhitespace = false;
+
+    // Everything the painters read, computed once per input change.
+    let leftText = '';
+    let rightText = '';
+    let structure = null;
 
     const root = document.createElement('div');
     root.className = 'utility utility-diff';
@@ -66,7 +71,13 @@ export const create = () => {
         button.textContent = label;
         button.addEventListener('click', () => {
             activeTab = id;
+            // A pending recompute would otherwise paint the tab from the
+            // previous keystroke's result.
+            scheduleRecompute.flush();
             paint();
+            // Monaco cannot measure itself while its pane is hidden, so the
+            // relayout belongs here rather than in every paint.
+            if (id === 'side') diffEditor.layout();
         });
         return button;
     };
@@ -180,8 +191,6 @@ export const create = () => {
         return note;
     };
 
-    let structure = null;
-
     const buildRow = (change) => {
         const row = document.createElement('button');
         row.type = 'button';
@@ -228,22 +237,23 @@ export const create = () => {
     };
 
     const paintStructure = () => {
-        const left = parse(original.getValue());
-        const right = parse(modified.getValue());
-
-        if (!left.ok || !right.ok) {
-            structure = null;
-            structureView.replaceChildren(
-                emptyNote(
-                    original.getValue().trim() || modified.getValue().trim()
-                        ? t.diffNeedsJson
-                        : t.diffEmpty
-                )
-            );
+        if (!leftText.trim() && !rightText.trim()) {
+            structureView.replaceChildren(emptyNote(t.diffEmpty));
             return;
         }
 
-        structure = structuralDiff(left.value, right.value);
+        // Byte-identical is a different answer from "the trees match", and
+        // saying "the difference is only in ordering or formatting" when there
+        // is no difference at all is simply untrue.
+        if (leftText === rightText) {
+            structureView.replaceChildren(emptyNote(t.diffSame));
+            return;
+        }
+
+        if (!structure) {
+            structureView.replaceChildren(emptyNote(t.diffNeedsJson));
+            return;
+        }
 
         if (structure.changes.length === 0) {
             structureView.replaceChildren(emptyNote(t.diffStructureSame));
@@ -259,19 +269,17 @@ export const create = () => {
     const paintStatus = () => {
         status.replaceChildren();
 
-        const left = original.getValue();
-        const right = modified.getValue();
-        if (!left.trim() && !right.trim()) {
+        if (!leftText.trim() && !rightText.trim()) {
             return;
         }
 
-        if (left === right) {
+        if (leftText === rightText) {
             status.appendChild(chip(t.diffSame, 'strong'));
             return;
         }
 
         status.appendChild(
-            chip(t.diffLines(left.split('\n').length, right.split('\n').length))
+            chip(t.diffLines(leftText.split('\n').length, rightText.split('\n').length))
         );
 
         if (structure) {
@@ -299,35 +307,44 @@ export const create = () => {
         whitespaceToggle.hidden = !showSide;
         formatButton.hidden = !showSide;
 
-        if (showSide) {
-            diffEditor.layout();
-        }
-
-        // The counts in the status strip come from the structural pass, so it
-        // runs even when the side-by-side tab is showing.
         paintStructure();
         paintStatus();
     };
 
-    const run = () => {
+    // Reading the models, parsing both sides and diffing the trees all happen
+    // here, once, and the painters work from the result. Doing it inside paint()
+    // meant four JSON.parse calls per keystroke, and a forced Monaco relayout
+    // on top of them.
+    const recompute = () => {
+        leftText = original.getValue();
+        rightText = modified.getValue();
+
+        const left = parse(leftText);
+        const right = parse(rightText);
+
         // JSON on both sides gets JSON highlighting; anything else stays plain
         // so a Markdown or log comparison is not painted with false syntax.
-        const language =
-            parse(original.getValue()).ok && parse(modified.getValue()).ok ? 'json' : 'plaintext';
+        const language = left.ok && right.ok ? 'json' : 'plaintext';
         editorModule.setModelLanguage(original, language);
         editorModule.setModelLanguage(modified, language);
+
+        structure = left.ok && right.ok ? structuralDiff(left.value, right.value) : null;
         paint();
     };
 
-    original.onDidChangeContent(run);
-    modified.onDidChangeContent(run);
+    // Monaco keeps the side-by-side view current on its own; only the
+    // structural pass and the counts need recomputing, and not on every
+    // keystroke of a large document.
+    const scheduleRecompute = debounce(recompute, 140);
+
+    original.onDidChangeContent(scheduleRecompute);
+    modified.onDidChangeContent(scheduleRecompute);
 
     whitespaceInput.addEventListener('change', () => {
-        ignoreWhitespace = whitespaceInput.checked;
-        diffEditor.updateOptions({ ignoreTrimWhitespace: ignoreWhitespace });
+        diffEditor.updateOptions({ ignoreTrimWhitespace: whitespaceInput.checked });
     });
 
-    paint();
+    recompute();
 
     return {
         root,
