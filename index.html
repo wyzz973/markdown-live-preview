@@ -122,10 +122,13 @@
             <span class="menu-label" data-i18n="recentFolders"></span>
             <div id="recent-folders"></div>
             <div class="menu-rule"></div>
-            <button type="button" class="menu-item" id="pick-folder" role="menuitem"
-                    data-i18n="openFolder"></button>
-            <button type="button" class="menu-item" id="close-folder" role="menuitem"
-                    data-i18n="closeFolder"></button>
+            <button type="button" class="menu-item" id="open-file" role="menuitem">
+              <span data-i18n="openFileItem"></span>
+              <kbd id="open-shortcut">⌘O</kbd>
+            </button>
+            <button type="button" class="menu-item" id="open-folder" role="menuitem"
+                    data-i18n="openFolderItem"></button>
+            <button type="button" class="menu-item" id="close-open" role="menuitem"></button>
           </div>
         </div>
 
@@ -134,7 +137,12 @@
         <div class="rail-empty" id="rail-empty" hidden>
           <h2 data-i18n="emptyFolderTitle"></h2>
           <p data-i18n="emptyFolderBody"></p>
-          <button type="button" class="open-btn" id="empty-open" data-i18n="openFolder"></button>
+          <div class="empty-actions">
+            <button type="button" class="open-btn" id="empty-open-file"
+                    data-i18n="openFile"></button>
+            <button type="button" class="open-btn ghost" id="empty-open-folder"
+                    data-i18n="openFolder"></button>
+          </div>
           <p class="caveat" data-i18n="emptyFolderCaveat"></p>
         </div>
       </nav>

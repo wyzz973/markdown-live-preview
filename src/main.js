@@ -54,9 +54,12 @@ const init = () => {
         folderName: document.querySelector('#folder-name'),
         folderMenu: document.querySelector('#folder-menu'),
         recentFolders: document.querySelector('#recent-folders'),
-        pickFolder: document.querySelector('#pick-folder'),
-        closeFolder: document.querySelector('#close-folder'),
-        emptyOpen: document.querySelector('#empty-open'),
+        openFile: document.querySelector('#open-file'),
+        openFolder: document.querySelector('#open-folder'),
+        openShortcut: document.querySelector('#open-shortcut'),
+        closeOpen: document.querySelector('#close-open'),
+        emptyOpenFile: document.querySelector('#empty-open-file'),
+        emptyOpenFolder: document.querySelector('#empty-open-folder'),
         modes: document.querySelector('#modes'),
         docTitle: document.querySelector('#doc-title'),
         docSep: document.querySelector('#doc-sep'),
@@ -86,6 +89,7 @@ const init = () => {
 
     const isMac = /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent);
     el.searchShortcut.textContent = isMac ? '⌘K' : 'Ctrl K';
+    el.openShortcut.textContent = isMac ? '⌘O' : 'Ctrl O';
 
     theme.init();
 
@@ -137,14 +141,19 @@ const init = () => {
     const workspace = workspaceModule.create({
         onFilesChanged: (entries) => {
             rail.setFiles(entries);
-            syncFolderChrome();
+            syncWorkspaceChrome();
         },
         onFileOpened: ({ entry, text }) => {
             loading = true;
-            // With a folder open the file is the source of truth: opening
-            // config.json moves the whole workbench to the JSON tool.
-            const type = entry ? toolsRegistry.toolForFile(entry.name).id : 'markdown';
-            if (entry && type !== activeTool) {
+            // The open file is the source of truth: opening config.json moves
+            // the whole workbench to the JSON tool. Closing it hands the
+            // workbench back to whichever tool owns the scratch buffer that is
+            // about to reappear — without this the header kept announcing JSON
+            // over a Markdown document, with the PDF button still hidden.
+            const type = entry
+                ? toolsRegistry.toolForFile(entry.name).id
+                : workspace.scratchKind();
+            if (type !== activeTool) {
                 activateTool(type);
             }
             setDocType(type);
@@ -224,21 +233,40 @@ const init = () => {
         }
     });
 
-    // Hand a produced document — a reassembled reply, a generated table — to
-    // the Markdown tool as a scratch buffer. The whole point of these tools
-    // living in one app is that output flows between them.
-    const openScratchMarkdown = (text) => {
-        if (!text?.trim()) {
-            return;
-        }
-        activateTool('markdown');
-        setDocType('markdown');
+    // Put text in the editor as a scratch buffer: a reassembled reply handed
+    // over from a utility, or a file read in a browser that cannot write back.
+    // The whole point of these tools living in one app is that documents flow
+    // between them.
+    const openScratch = (text, toolId = 'markdown') => {
+        // Whatever file was open stops being the destination — otherwise the
+        // handed-over text would autosave straight over it.
+        workspace.detach();
+        rail.setCurrentPath(null);
+        activateTool(toolId);
+        setDocType(toolId);
         loading = true;
         editor.setValue(text);
+        editor.revealPosition({ lineNumber: 1, column: 1 });
         loading = false;
         convert(text);
         workspace.recordEdit(text);
         el.preview.scrollTo({ top: 0 });
+    };
+
+    const openScratchMarkdown = (text) => {
+        // An empty handoff would silently wipe the Markdown buffer, so the
+        // button simply does nothing when there is nothing to hand over.
+        if (text?.trim()) {
+            openScratch(text);
+        }
+    };
+
+    // Firefox and Safari can read a file but not write to one. Rather than
+    // pretending, the content is loaded as a scratch buffer and the toast says
+    // plainly that it is a copy.
+    const openCopy = (name, text) => {
+        openScratch(text, toolsRegistry.toolForFile(name).id);
+        toast(t.openedCopy(name));
     };
 
     // ----- tools -----
@@ -298,9 +326,12 @@ const init = () => {
         el.mobileTabs[1].textContent = isDocument ? t.modeRead : t.tabOutput;
 
         if (isDocument) {
-            // With a folder open the open file decides the type; otherwise the
-            // tool brings its own scratch buffer forward.
-            if (!workspace.isFolderOpen() && (!bootstrapped || workspace.scratchKind() !== tool.id)) {
+            // With a file open — from a folder or on its own — that file decides
+            // the type; otherwise the tool brings its own scratch buffer
+            // forward. The test is "is a file open", not "is a folder open":
+            // loading a scratch buffer over an open file would send the next
+            // keystroke's autosave into that file on disk.
+            if (!workspace.isDocumentOpen() && (!bootstrapped || workspace.scratchKind() !== tool.id)) {
                 const fallback = tool.id === 'json' ? defaultJson : defaultDocument;
                 // On first paint the editor is empty; handing that to
                 // switchScratch would persist the blank as the outgoing
@@ -372,18 +403,34 @@ const init = () => {
         if (event.key === 'Escape') setToolMenu(false);
     });
 
-    // ----- folder chrome -----
+    // ----- workspace chrome -----
 
-    const syncFolderChrome = () => {
-        const open = workspace.isFolderOpen();
-        el.folderName.textContent = open ? workspace.folderName() : t.noFolder;
-        el.rail.dataset.folder = open ? 'open' : 'empty';
-        el.railEmpty.hidden = open;
-        el.closeFolder.hidden = !open;
+    // The rail's title names the scope of the tree below it: a folder, one
+    // file, or nothing. A folder keeps its trailing slash so the two never read
+    // alike at a glance.
+    const syncWorkspaceChrome = () => {
+        const mode = workspace.mode();
+        const entry = workspace.currentEntry();
 
-        el.folderButton.title = open
-            ? `${workspace.folderName()} · ${t.fileCount(workspace.entries().length)}`
-            : t.switchFolder;
+        el.folderName.textContent =
+            mode === 'folder'
+                ? `${workspace.folderName()}/`
+                : mode === 'file'
+                  ? entry.name
+                  : t.noDocument;
+
+        el.rail.dataset.folder = mode === 'scratch' ? 'empty' : 'open';
+        el.railEmpty.hidden = mode !== 'scratch';
+
+        el.closeOpen.hidden = mode === 'scratch';
+        el.closeOpen.textContent = mode === 'folder' ? t.closeFolder : t.closeFile;
+
+        el.folderButton.title =
+            mode === 'folder'
+                ? `${workspace.folderName()} · ${t.fileCount(workspace.entries().length)}`
+                : mode === 'file'
+                  ? entry.path
+                  : t.switchFolder;
     };
 
     const setMenu = (open) => {
@@ -394,8 +441,12 @@ const init = () => {
         }
     };
 
+    // Files and folders share one list. Two handles are the same entry only if
+    // `isSameEntry` says so — names collide constantly once README.md is a
+    // candidate — so the current marker is resolved by asking, not by matching
+    // strings.
     const paintRecents = async () => {
-        const records = await files.recentFolders();
+        const records = await files.recentEntries();
         if (records.length === 0) {
             const empty = document.createElement('span');
             empty.className = 'menu-empty';
@@ -404,55 +455,100 @@ const init = () => {
             return;
         }
 
+        const open = workspace.openHandleRef();
+        const current = await Promise.all(
+            records.map((record) =>
+                open ? record.handle.isSameEntry(open).catch(() => false) : false
+            )
+        );
+
         el.recentFolders.replaceChildren(
-            ...records.map((record) => {
+            ...records.map((record, i) => {
                 const button = document.createElement('button');
                 button.type = 'button';
                 button.className = 'menu-item';
                 button.setAttribute('role', 'menuitem');
-                button.setAttribute('aria-current', String(record.name === workspace.folderName()));
+                button.setAttribute('aria-current', String(current[i]));
+                button.title = record.name;
 
                 const name = document.createElement('span');
                 name.className = 'name';
                 name.textContent = record.name;
                 button.appendChild(name);
 
+                if (record.kind === 'directory') {
+                    const slash = document.createElement('span');
+                    slash.className = 'kind';
+                    slash.textContent = '/';
+                    button.appendChild(slash);
+                }
+
                 button.addEventListener('click', async () => {
                     setMenu(false);
-                    await workspace.reopenFolder(record.handle);
+                    await workspace.reopenRecent(record);
                 });
                 return button;
             })
         );
     };
 
-    if (files.isSupported()) {
-        el.folderButton.addEventListener('click', (event) => {
-            event.stopPropagation();
-            setMenu(el.folderMenu.hidden);
-        });
-        el.folderMenu.addEventListener('click', (event) => event.stopPropagation());
-        document.addEventListener('click', () => setMenu(false));
+    // Opening one file needs only the file picker; browsing a folder needs the
+    // directory picker. Where neither exists the file still opens, as a copy.
+    const openFileFlow = async () => {
+        setMenu(false);
+        if (files.canPickFile()) {
+            await workspace.openFile();
+            return;
+        }
+        const file = await pickFileFallback();
+        if (file) {
+            openCopy(file.name, await file.text());
+        }
+    };
 
-        const openFolder = async () => {
-            setMenu(false);
-            await workspace.openFolder();
-        };
+    const openFolderFlow = async () => {
+        setMenu(false);
+        await workspace.openFolder();
+    };
 
-        el.pickFolder.addEventListener('click', openFolder);
-        el.emptyOpen.addEventListener('click', openFolder);
-        el.closeFolder.addEventListener('click', () => {
-            setMenu(false);
-            workspace.closeFolder();
+    // A hidden input is the only way in for browsers without the File System
+    // Access API. It hands back a File, never a handle, so nothing can be
+    // written back — which is exactly what the toast tells the reader.
+    const pickFileFallback = () =>
+        new Promise((resolve) => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = files.acceptAttribute();
+            input.addEventListener('change', () => resolve(input.files?.[0] ?? null), {
+                once: true
+            });
+            // A dismissed dialog fires nothing in some browsers; the promise is
+            // simply never settled, and the input is garbage once it goes.
+            input.click();
         });
-    } else {
-        // Firefox and Safari: keep the editor, drop the folder affordances
-        // rather than leaving buttons that cannot work.
-        el.folderButton.disabled = true;
-        el.folderButton.classList.add('unsupported');
-        el.pickFolder.hidden = true;
-        el.emptyOpen.hidden = true;
-        el.searchButton.hidden = true;
+
+    el.folderButton.addEventListener('click', (event) => {
+        event.stopPropagation();
+        setMenu(el.folderMenu.hidden);
+    });
+    el.folderMenu.addEventListener('click', (event) => event.stopPropagation());
+    document.addEventListener('click', () => setMenu(false));
+
+    el.openFile.addEventListener('click', openFileFlow);
+    el.emptyOpenFile.addEventListener('click', openFileFlow);
+    el.openFolder.addEventListener('click', openFolderFlow);
+    el.emptyOpenFolder.addEventListener('click', openFolderFlow);
+    el.closeOpen.addEventListener('click', () => {
+        setMenu(false);
+        workspace.close();
+    });
+
+    if (!files.isSupported()) {
+        // Firefox and Safari: a folder is a library the browser cannot walk,
+        // so those affordances go rather than sitting there unable to work.
+        // Opening a single file stays — it is the errand people actually have.
+        el.openFolder.hidden = true;
+        el.emptyOpenFolder.hidden = true;
     }
 
     // ----- search -----
@@ -545,6 +641,66 @@ const init = () => {
 
     scrollSync.setup({ editor, preview: el.preview, checkbox: el.syncCheckbox });
 
+    // ----- dropping a document on the window -----
+    //
+    // The gesture people already have for "open this in that". Chromium hands
+    // over a real handle, so a dropped file is editable in place exactly like a
+    // picked one; elsewhere only the bytes come through and it opens as a copy.
+
+    const setDropState = (over) => {
+        if (over) {
+            el.container.dataset.drop = 'over';
+        } else {
+            delete el.container.dataset.drop;
+        }
+    };
+
+    const carriesFile = (event) =>
+        Array.from(event.dataTransfer?.items ?? []).some((item) => item.kind === 'file');
+
+    document.addEventListener('dragover', (event) => {
+        if (!carriesFile(event)) return;
+        // Without preventDefault the browser navigates to the dropped file and
+        // the editor is gone.
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+        setDropState(true);
+    });
+
+    // Fires on every child element too; only a null relatedTarget means the
+    // pointer has actually left the window.
+    document.addEventListener('dragleave', (event) => {
+        if (event.relatedTarget === null) setDropState(false);
+    });
+
+    document.addEventListener('drop', async (event) => {
+        if (!carriesFile(event)) return;
+        event.preventDefault();
+        setDropState(false);
+
+        const item = event.dataTransfer.items[0];
+        // Both of these must be read before the first await — the DataTransfer
+        // is emptied as soon as the handler yields.
+        const handlePromise = item.getAsFileSystemHandle?.();
+        const file = item.getAsFile();
+
+        if (handlePromise) {
+            const handle = await handlePromise;
+            if (handle.kind === 'file' && !files.isDocumentName(handle.name)) {
+                toast(t.notDocumentFile);
+                return;
+            }
+            await workspace.openHandle(handle);
+            return;
+        }
+
+        if (!file || !files.isDocumentName(file.name)) {
+            toast(t.notDocumentFile);
+            return;
+        }
+        openCopy(file.name, await file.text());
+    });
+
     // ----- keyboard -----
 
     document.addEventListener('keydown', (event) => {
@@ -559,6 +715,11 @@ const init = () => {
             } else {
                 toast(t.searchNeedsFolder);
             }
+        } else if (key === 'o') {
+            // The browser's own ⌘O opens a page, not a document; here the
+            // document is the point.
+            event.preventDefault();
+            openFileFlow();
         } else if (key === 's') {
             event.preventDefault();
             workspace.flush(editor.getValue());
@@ -570,7 +731,7 @@ const init = () => {
 
     // ----- start -----
 
-    syncFolderChrome();
+    syncWorkspaceChrome();
 
     el.saveDot.title = t.saved;
 

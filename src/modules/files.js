@@ -1,10 +1,16 @@
-// Local folder access via the File System Access API.
+// Local disk access via the File System Access API.
 //
-// Chromium browsers only. Everything here is behind `isSupported()` and the app
+// Two entry points, because the two are genuinely different jobs: a folder is a
+// library you browse and search, a single file is a document you came here to
+// edit. Wiring the second one through the folder machinery would have meant a
+// one-file "folder", which reads wrong in the rail and searches nothing.
+//
+// Chromium browsers only. Everything here is behind a support check and the app
 // falls back to a localStorage-backed scratch buffer where the API is missing,
-// so Firefox and Safari still get a working editor — just no folder.
+// so Firefox and Safari still get a working editor.
 
 import { putRecord, deleteRecord, allRecords } from './idb.js';
+import { t } from './strings.js';
 
 // Driven by the tool registry so a new document tool's extensions are picked
 // up here without a second list to keep in sync.
@@ -15,8 +21,22 @@ const SKIP_DIRECTORIES = new Set(['node_modules', '.git', '.obsidian', '.trash',
 const MAX_DEPTH = 6;
 const MAX_FILES = 2000;
 
+export const isDocumentName = (name) => DOCUMENT_FILE.test(name);
+
+// For the <input type="file"> fallback, which takes a comma-separated list.
+export const acceptAttribute = () =>
+    documentExtensions()
+        .map((extension) => `.${extension}`)
+        .join(',');
+
+// Folder browsing needs the directory picker; opening one file only needs the
+// file picker. Safari has neither, Firefox has neither — but both can still
+// read a dropped file, which is why the two checks are kept apart.
 export const isSupported = () =>
     typeof window !== 'undefined' && typeof window.showDirectoryPicker === 'function';
+
+export const canPickFile = () =>
+    typeof window !== 'undefined' && typeof window.showOpenFilePicker === 'function';
 
 // ----- permissions -----
 
@@ -102,6 +122,15 @@ export const writeFile = async (entry, text) => {
     return { modifiedAt: file.lastModified, size: file.size };
 };
 
+// A single file becomes the same shape a folder walk produces, so everything
+// downstream — reading, writing, the dirty dot — works without a second path.
+export const entryForFile = (handle) => ({
+    name: handle.name,
+    dir: '',
+    path: handle.name,
+    handle
+});
+
 // ----- picking and remembering -----
 
 export const pickDirectory = async () => {
@@ -110,28 +139,63 @@ export const pickDirectory = async () => {
     return handle;
 };
 
-// Recent folders are keyed by name. Two different folders that share a name
-// would collide, so the key also carries a resolved marker when available.
-const keyFor = (handle) => `dir:${handle.name}`;
+export const pickFile = async () => {
+    const [handle] = await window.showOpenFilePicker({
+        id: 'notes',
+        multiple: false,
+        types: [
+            {
+                description: t.filePickerLabel,
+                accept: { 'text/*': documentExtensions().map((extension) => `.${extension}`) }
+            }
+        ]
+    });
+    await remember(handle);
+    return handle;
+};
+
+// Recents used to be keyed by name, which collided for two folders called
+// `docs` — and would collide far harder now that files are in the list, where
+// several `README.md` are the norm rather than the exception. `isSameEntry` is
+// the only reliable identity test the API offers, so the id is arbitrary and
+// the lookup is a scan. The list is capped at a handful of records, so a scan
+// costs nothing; a wrong match would cost the user their history.
+const findRecord = async (handle) => {
+    for (const record of await allRecords()) {
+        try {
+            if (record.handle && (await record.handle.isSameEntry(handle))) {
+                return record;
+            }
+        } catch (error) {
+            // A record written by an older build, or a handle the browser can
+            // no longer resolve; either way it is not a match.
+        }
+    }
+    return null;
+};
 
 export const remember = async (handle) => {
+    const existing = await findRecord(handle);
     await putRecord({
-        id: keyFor(handle),
+        id: existing?.id ?? `${handle.kind}:${crypto.randomUUID()}`,
+        kind: handle.kind,
         name: handle.name,
         handle,
         openedAt: Date.now()
     });
 };
 
-export const forget = (handle) => deleteRecord(keyFor(handle));
+export const forget = (id) => deleteRecord(id);
 
-export const recentFolders = async () => {
+export const recentEntries = async () => {
     try {
         const records = await allRecords();
         return records
             .filter((record) => record.handle)
+            // Records written before single files existed were all folders.
+            .map((record) => ({ ...record, kind: record.kind ?? 'directory' }))
             .sort((a, b) => b.openedAt - a.openedAt)
-            .slice(0, 6);
+            .slice(0, 8);
     } catch (error) {
         return [];
     }

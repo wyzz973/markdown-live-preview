@@ -1,11 +1,16 @@
-// The folder workspace: which folder is open, which file is being edited, and
-// where edits are saved.
+// The workspace: what is open, which file is being edited, and where edits go.
 //
-// Two storage modes, deliberately distinct:
-//   - no folder open -> a scratch buffer kept in localStorage (works in every
-//     browser, including the ones without the File System Access API)
-//   - folder open    -> the open file IS the document; edits are written back
-//     to disk, debounced
+// Three modes, deliberately distinct:
+//   - 'scratch' : nothing opened; a buffer kept in localStorage (works in every
+//                 browser, including the ones without the File System Access API)
+//   - 'file'    : one file opened directly; it IS the document
+//   - 'folder'  : a library to browse and search; the selected file is the
+//                 document
+//
+// In both disk modes edits are written back to the file, debounced. Modes 'file'
+// and 'folder' differ only in what surrounds the document — the read/write path
+// is the same, which is why a single file is represented as the same entry shape
+// the folder walk produces rather than as a folder of one.
 //
 // The save dot in the header tells which state the buffer is in rather than
 // claiming "all changes saved" the way a cloud editor would.
@@ -25,6 +30,8 @@ export const create = ({ onFilesChanged, onFileOpened, onDirtyChanged, onError }
     let entries = [];
     let current = null; // the open file entry, or null in scratch mode
     let dirty = false;
+
+    const mode = () => (directory ? 'folder' : current ? 'file' : 'scratch');
 
     const setDirty = (next) => {
         if (dirty === next) return;
@@ -128,33 +135,95 @@ export const create = ({ onFilesChanged, onFileOpened, onDirtyChanged, onError }
         buildIndex();
     };
 
-    const openFolder = async () => {
-        try {
-            const handle = await files.pickDirectory();
+    // One file, no library around it. The rail falls back to the outline of
+    // what is open, which is all there is to navigate.
+    const adoptFile = async (handle) => {
+        directory = null;
+        entries = [];
+        index.clear();
+        // openEntry announces both the file and the (now empty) file list, so
+        // the chrome never paints a half-switched state.
+        await openEntry(files.entryForFile(handle));
+    };
+
+    // Shared by the recent list and by dropping something on the window: both
+    // arrive holding a handle that may not be authorised yet.
+    const adopt = async (handle) => {
+        if (!(await files.ensurePermission(handle))) {
+            onError(t.permissionDenied);
+            return;
+        }
+        await files.remember(handle);
+        if (handle.kind === 'file') {
+            await adoptFile(handle);
+        } else {
             await adoptDirectory(handle);
+        }
+    };
+
+    // AbortError means the user dismissed the picker; that is not a failure
+    // worth reporting.
+    const runPicker = async (pick, adoptPicked, failure) => {
+        try {
+            await adoptPicked(await pick());
         } catch (error) {
-            // AbortError means the user dismissed the picker; that is not a
-            // failure worth reporting.
             if (error?.name !== 'AbortError') {
-                onError(t.openFolderFailed);
+                onError(failure);
             }
         }
     };
 
-    const reopenFolder = async (handle) => {
+    const openFolder = () =>
+        runPicker(files.pickDirectory, adoptDirectory, t.openFolderFailed);
+
+    const openFile = () => runPicker(files.pickFile, adoptFile, t.openFileFailed);
+
+    const openHandle = async (handle) => {
         try {
-            if (!(await files.ensurePermission(handle))) {
+            await adopt(handle);
+        } catch (error) {
+            onError(handle.kind === 'file' ? t.openFileFailed : t.openFolderFailed);
+        }
+    };
+
+    // A remembered handle can outlive the thing it points at. Rather than
+    // reporting a generic failure every time, drop the record so the list
+    // reflects what is actually still there.
+    const reopenRecent = async (record) => {
+        try {
+            if (!(await files.ensurePermission(record.handle))) {
                 onError(t.permissionDenied);
                 return;
             }
-            await files.remember(handle);
-            await adoptDirectory(handle);
+            // openEntry reports its own read failures, so a file that has been
+            // moved or deleted would arrive as a vague "read failed". Touching
+            // it first lets the record be cleaned up instead.
+            if (record.kind === 'file') {
+                await record.handle.getFile();
+            }
+            await adopt(record.handle);
         } catch (error) {
-            onError(t.openFolderFailed);
+            if (error?.name === 'NotFoundError') {
+                await files.forget(record.id);
+                onError(t.entryGone);
+                return;
+            }
+            onError(record.kind === 'file' ? t.openFileFailed : t.openFolderFailed);
         }
     };
 
-    const closeFolder = (scratchText) => {
+    // Step back from the open file without closing the library around it. Used
+    // when a utility hands a produced document to the editor: that text is a
+    // new scratch buffer, and leaving the file attached would send it to disk
+    // on the next autosave.
+    const detach = () => {
+        if (!current) return;
+        current = null;
+        setDirty(false);
+        onFilesChanged(entries);
+    };
+
+    const close = (scratchText) => {
         directory = null;
         entries = [];
         current = null;
@@ -166,13 +235,21 @@ export const create = ({ onFilesChanged, onFileOpened, onDirtyChanged, onError }
 
     return {
         openFolder,
-        reopenFolder,
-        closeFolder,
+        openFile,
+        openHandle,
+        reopenRecent,
+        detach,
+        close,
         openEntry,
         recordEdit,
         search: (query) => index.search(query),
+        mode,
         isFolderOpen: () => directory !== null,
+        // True whenever edits go to disk rather than to the scratch buffer.
+        isDocumentOpen: () => current !== null,
         folderName: () => directory?.name ?? null,
+        // What the recent list should mark as current.
+        openHandleRef: () => directory ?? current?.handle ?? null,
         entries: () => entries,
         currentPath: () => current?.path ?? null,
         currentEntry: () => current,
