@@ -744,6 +744,7 @@ button.ghost.active { background: var(--wash); color: var(--ink); font-weight: 5
 .utility-tab:hover { background: var(--galley-sub); color: var(--ink); }
 .utility-tab.active { background: var(--wash); color: var(--ink); font-weight: 500; }
 .utility-tabs .ghost { margin-left: auto; }
+.bar-spacer { flex: 1; min-width: 8px; }
 
 /* An empty tab stays visible but dimmed, and each carries its count — so the
    tab strip itself says what the response contained without a single click. */
@@ -866,6 +867,252 @@ button.ghost.active { background: var(--wash); color: var(--ink); font-weight: 5
 }
 
 .event-other .event-detail, .event-usage .event-detail { color: var(--ink-faint); }
+
+/* ---------- diff ----------
+   Not the input/output split the other utilities use: in a diff the two panes
+   ARE the input, so the whole workbench is the comparison. */
+
+.utility-diff { flex-direction: column; }
+
+.diff-side {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* The sash is fixed at the middle (see editor.js), so these two labels stay
+   over the columns they name. */
+.diff-columns {
+  flex: none;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-bottom: 1px solid var(--edge);
+  background: var(--galley);
+}
+
+.diff-columns span {
+  padding: 4px 10px;
+  color: var(--ink-faint);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+}
+
+.diff-columns span + span { border-left: 1px solid var(--edge); }
+
+/* Monaco lays the two panes out at half the container each and then draws the
+   sash between them, so the diff editor ends up one pixel wider than the space
+   it was given — enough to put a scrollbar across the whole window. */
+.diff-host { flex: 1; min-height: 0; overflow: hidden; }
+
+.diff-structure { padding: 8px 10px 32px; }
+
+.diff-rows { display: flex; flex-direction: column; }
+
+.diff-row {
+  display: grid;
+  grid-template-columns: 2ch minmax(8rem, 22rem) 1fr;
+  gap: 10px;
+  align-items: baseline;
+  width: 100%;
+  padding: 3px 6px;
+  border-radius: var(--radius);
+  text-align: left;
+  font-size: 12px;
+}
+
+.diff-row:hover { background: var(--galley-sub); }
+.diff-row.copied { background: var(--wash); }
+
+/* The signature column, same slot the rail draws `#` and `{}` in: the mark
+   says what happened, so the row needs no colour to carry it. */
+.diff-mark {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-weight: 600;
+  text-align: center;
+}
+
+.diff-path {
+  color: var(--ink);
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-value {
+  min-width: 0;
+  color: var(--ink-soft);
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A copy-editor strikes out what goes; that is the whole convention, and it
+   works in one colour. Green and red would say the same thing less clearly and
+   would spend the red this palette reserves for real problems. */
+.diff-remove .diff-value,
+.diff-before {
+  color: var(--ink-faint);
+  text-decoration: line-through;
+}
+
+.diff-arrow { margin: 0 6px; color: var(--ink-faint); }
+
+/* ---------- request inspector ---------- */
+
+.req-params {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 14px;
+}
+
+.req-table { display: flex; flex-direction: column; }
+
+.req-row {
+  display: grid;
+  grid-template-columns: 4ch 9ch minmax(6rem, 1fr) 7ch 92px;
+  gap: 10px;
+  align-items: center;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--edge);
+  font-size: 12px;
+}
+
+.req-head {
+  color: var(--ink-faint);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+/* Cached prefixes are marked, not coloured in — the wash means "marked"
+   everywhere else in the app too. */
+.req-cached { box-shadow: inset 2px 0 0 var(--wash); }
+
+.req-cell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.req-turn { color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.req-role { color: var(--ink); font-family: var(--mono); }
+.req-blocks { color: var(--ink-soft); font-family: var(--mono); font-size: 11.5px; }
+.req-chars { color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Printed and drawn: a column of percentages reads flat, a column of bars
+   shows you which turn is eating the context without being read. */
+.req-share { display: flex; align-items: center; gap: 7px; overflow: visible; }
+
+.req-bar {
+  position: relative;
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--galley-sub);
+  overflow: hidden;
+}
+
+.req-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--share, 0%);
+  background: var(--ink-soft);
+}
+
+.req-percent {
+  flex: none;
+  width: 3.5ch;
+  color: var(--ink-faint);
+  text-align: right;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.req-turn-box {
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--edge);
+}
+
+.req-turn-box:last-child { border-bottom: none; }
+
+.req-turn-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+
+.req-turn-index {
+  min-width: 2ch;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+
+.req-turn-role { color: var(--ink); font-family: var(--mono); font-weight: 600; font-size: 12.5px; }
+.req-turn-size { margin-left: auto; color: var(--ink-faint); font-size: 11px; }
+
+.req-text {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font: 400 12.5px/1.75 var(--ui);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Thinking is the model talking to itself; it stays legible but steps back. */
+.req-thinking {
+  margin-bottom: 8px;
+  padding-left: 10px;
+  border-left: 1px solid var(--edge);
+}
+
+.req-thinking .req-text { color: var(--ink-soft); }
+
+.req-image { margin: 0 0 10px; }
+.req-image img {
+  display: block;
+  max-width: 240px;
+  max-height: 240px;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+}
+.req-image figcaption { margin-top: 4px; color: var(--ink-faint); font-size: 11px; }
+.req-image-note { color: var(--ink-faint); font-size: 11.5px; word-break: break-all; }
+
+.req-tool-desc {
+  margin: 0;
+  padding: 8px 10px 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.req-params-list { display: flex; flex-direction: column; padding: 8px 10px 10px; }
+
+.req-param {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+
+.req-param-name { color: var(--ink); font-family: var(--mono); }
+.req-param-type { color: var(--ink-faint); font-family: var(--mono); font-size: 11px; }
+.req-param-required { color: var(--ink-soft); font-size: 11px; }
+.req-param-desc {
+  min-width: 0;
+  margin-left: auto;
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* ---------- JSON panel ---------- */
 

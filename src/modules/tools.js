@@ -25,6 +25,14 @@ export const TOOLS = [
         hint: () => t.toolJsonHint,
         extensions: ['json', 'jsonc', 'json5']
     },
+    // Request and response sit next to each other on purpose: they are the two
+    // halves of one exchange, and debugging usually walks from one to the other.
+    {
+        id: 'request',
+        kind: 'utility',
+        name: () => t.toolRequest,
+        hint: () => t.toolRequestHint
+    },
     {
         id: 'stream',
         kind: 'utility',
@@ -32,11 +40,24 @@ export const TOOLS = [
         hint: () => t.toolStreamHint
     },
     {
+        id: 'diff',
+        kind: 'utility',
+        name: () => t.toolDiff,
+        hint: () => t.toolDiffHint
+    },
+    {
         id: 'unicode',
         kind: 'utility',
         name: () => t.toolUnicode,
         hint: () => t.toolUnicodeHint
     }
+];
+
+// The menu groups by workbench kind. At four tools a flat list was fine; at six
+// it stopped saying which ones open a file and which ones take a paste.
+export const GROUPS = [
+    { kind: 'document', label: () => t.groupDocument },
+    { kind: 'utility', label: () => t.groupUtility }
 ];
 
 export const byId = (id) => TOOLS.find((tool) => tool.id === id) ?? TOOLS[0];

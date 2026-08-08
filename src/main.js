@@ -19,6 +19,8 @@ import * as jsonTools from './modules/json-tools.js';
 import * as jsonToolView from './tools/json-tool.js';
 import * as streamTool from './tools/stream-tool.js';
 import * as unicodeTool from './tools/unicode-tool.js';
+import * as requestTool from './tools/request-tool.js';
+import * as diffTool from './tools/diff-tool.js';
 import { toPdf } from './modules/export.js';
 
 const TOAST_MS = 3200;
@@ -272,7 +274,9 @@ const init = () => {
     // ----- tools -----
 
     const utilities = {
+        request: requestTool.create({ onOpenInMarkdown: (text) => openScratchMarkdown(text) }),
         stream: streamTool.create({ onOpenInMarkdown: (text) => openScratchMarkdown(text) }),
+        diff: diffTool.create(),
         unicode: unicodeTool.create()
     };
 
@@ -282,9 +286,14 @@ const init = () => {
     });
 
     let activeTool = 'markdown';
-    // Until the first tool is activated there is nothing in the editor, so the
-    // activation must load a buffer even when the kind already matches.
-    let bootstrapped = false;
+
+    // Whether the editor holds a scratch buffer yet — not whether the app has
+    // started. The two came apart once the station could resume on a utility:
+    // booting into one leaves the editor empty, and treating that as "started"
+    // meant the next switch to Markdown skipped the load (matching kind, so
+    // nothing to switch) and the switch after that persisted the blank editor
+    // over the saved buffer. Set only where a buffer is actually loaded.
+    let editorLoaded = false;
 
     const activateTool = (id, { persist = true } = {}) => {
         const tool = toolsRegistry.byId(id);
@@ -331,12 +340,12 @@ const init = () => {
             // forward. The test is "is a file open", not "is a folder open":
             // loading a scratch buffer over an open file would send the next
             // keystroke's autosave into that file on disk.
-            if (!workspace.isDocumentOpen() && (!bootstrapped || workspace.scratchKind() !== tool.id)) {
+            if (!workspace.isDocumentOpen() && (!editorLoaded || workspace.scratchKind() !== tool.id)) {
                 const fallback = tool.id === 'json' ? defaultJson : defaultDocument;
-                // On first paint the editor is empty; handing that to
-                // switchScratch would persist the blank as the outgoing
-                // buffer and wipe whatever was saved.
-                const text = bootstrapped
+                // With nothing loaded yet the editor is empty; handing that to
+                // switchScratch would persist the blank as the outgoing buffer
+                // and wipe whatever was saved.
+                const text = editorLoaded
                     ? workspace.switchScratch(tool.id, editor.getValue(), fallback)
                     : workspace.initialScratch(tool.id, fallback);
                 loading = true;
@@ -344,6 +353,7 @@ const init = () => {
                 editor.setValue(text);
                 editor.revealPosition({ lineNumber: 1, column: 1 });
                 loading = false;
+                editorLoaded = true;
             } else {
                 setDocType(tool.id);
             }
@@ -365,24 +375,34 @@ const init = () => {
         el.toolButton.setAttribute('aria-expanded', String(open));
     };
 
+    const toolItem = (tool) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'tool-item';
+        button.setAttribute('role', 'menuitem');
+        button.dataset.tool = tool.id;
+
+        const name = document.createElement('span');
+        name.className = 'n';
+        name.textContent = tool.name();
+        const hint = document.createElement('span');
+        hint.className = 'h';
+        hint.textContent = tool.hint();
+
+        button.append(name, hint);
+        button.addEventListener('click', () => activateTool(tool.id));
+        return button;
+    };
+
     el.toolMenu.replaceChildren(
-        ...toolsRegistry.TOOLS.map((tool) => {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'tool-item';
-            button.setAttribute('role', 'menuitem');
-            button.dataset.tool = tool.id;
+        ...toolsRegistry.GROUPS.flatMap((group) => {
+            const tools = toolsRegistry.TOOLS.filter((tool) => tool.kind === group.kind);
+            if (tools.length === 0) return [];
 
-            const name = document.createElement('span');
-            name.className = 'n';
-            name.textContent = tool.name();
-            const hint = document.createElement('span');
-            hint.className = 'h';
-            hint.textContent = tool.hint();
-
-            button.append(name, hint);
-            button.addEventListener('click', () => activateTool(tool.id));
-            return button;
+            const label = document.createElement('span');
+            label.className = 'menu-label';
+            label.textContent = group.label();
+            return [label, ...tools.map(toolItem)];
         })
     );
 
@@ -740,7 +760,6 @@ const init = () => {
     // scratch buffer; startup must not preload one itself, or it would read a
     // different key from the one saves are written to.
     activateTool(read(KEYS.activeTool, 'markdown'), { persist: false });
-    bootstrapped = true;
 };
 
 window.addEventListener('DOMContentLoaded', init);

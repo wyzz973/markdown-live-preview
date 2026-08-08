@@ -8,11 +8,51 @@
 | --- | --- | --- |
 | **Markdown** | 文档型 | 实时预览、大纲、导出 PDF（矢量、可选中、不断页） |
 | **JSON** | 文档型 | 格式化、校验、修复、JSONPath 查询、转 YAML/CSV/Markdown 表格/TypeScript/Go |
+| **请求体检查** | 工具型 | 把 messages 请求拆成对话读：轮次占比、工具定义、图片、缓存断点 |
 | **流式响应还原** | 工具型 | 把大模型的 SSE / JSONL 抓包还原成完整回复，按 Markdown 渲染 |
+| **对比** | 工具型 | 文本逐字符 diff，JSON 按结构 diff（忽略键顺序与格式） |
 | **Unicode 转换** | 工具型 | 中文与 `\uXXXX` 互转 |
 
 两种工作台共用一副骨架：文档型是 `侧栏 │ 编辑 │ 预览`，工具型是 `输入 │ 输出`。
-新增工具是往 `src/modules/tools.js` 里加一项加它自己的模块，不动导航。
+新增工具是往 `src/modules/tools.js` 里加一项加它自己的模块，不动导航。工具菜单按
+工作台种类分组，所以"要开文件的"和"粘一段进去的"一眼分得开。
+
+### 请求体检查
+
+「流式响应还原」的镜像：那个把响应还原成消息，这个把请求还原成对话。调 agent 的时候
+面对的是一坨 200 kB 的 `messages`，system、二十轮对话、工具 schema、base64 图片、
+缓存标记全糊在一行里。
+
+- 认 Anthropic Messages / OpenAI Chat / Gemini `generateContent` / Ollama 四种请求体，
+  也认整条 cURL 命令（网络面板「以 cURL 复制」直接粘，含 `$'...'` 与 `'\''` 转义）
+- **概览是这个工具存在的理由**：按轮次列出字符数和占比，还画成条。上下文塞满时问题
+  从来不是"请求多大"，而是"哪一轮在吃它"——上面那份示例里，一个工具定义就占了 65%
+- OpenAI 的 `tool_calls.arguments` 是字符串，二次解析后才漂亮打印
+- system 无论写在顶层还是当作第一条消息，都提到同一个位置，两种形状才可比
+- 工具定义展开成参数表（名字 / 类型 / 必填 / 说明），而不是甩一整份 JSON Schema
+- 内联 base64 图片出缩略图；**远程图片只显示 URL 不加载**——去取它就等于把粘进来的
+  载荷送上网，本地优先的工具不能背着人做这件事
+- token 数标的是**估算**（中日韩字符按 1，其余按 4 字符 1 token）。Claude 的分词器
+  没公开，精确值要联网调 `count_tokens`，本站不发请求，所以宁可标"约"也不给一个
+  看起来权威的错数
+
+### 对比
+
+两个镜头看同一对输入，不是两个工具。
+
+「并排」是 Monaco 的字符 diff。**不用红绿**：并排布局里左右位置已经编码了增删，一层
+洗色就够；而这套配色里红色只表示"出问题了"，删掉一行不是错误。
+
+「结构」把两侧当 JSON 树比，忽略键顺序和缩进。数组是难点——按下标比的话，头部插入
+一个元素会让整个数组报"全变了"：
+
+- 元素都是对象且有同一个唯一标识键（`id`/`uuid`/`key`/…）时，按它配对
+- 否则做 LCS 对齐，再把相邻的"删+增"配成一对递归下去，于是"第 3 个元素被替换"变成
+  "第 3 个元素的 status 变了"
+
+差异行的左列画 `+ − ~`——和侧栏画 `#`、`{}` 是同一套记号词汇。删掉的值加删除线：
+校对员就是这么标的，一种颜色够用。点一行复制它的 JSONPath，可以直接粘进 JSON 工具的
+查询框。
 
 ### 流式响应还原
 
@@ -112,12 +152,16 @@ src/main.js                装配
 src/default-document.js    初始文档
 src/tools/
   json-tool.js             JSON 预览面板：查询与转换
+  request-tool.js          请求体检查
   stream-tool.js           流式响应还原
+  diff-tool.js             并排与结构对比
   unicode-tool.js          Unicode 互转
 src/modules/
-  tools.js                 工具注册表与文件类型归属
+  tools.js                 工具注册表、菜单分组与文件类型归属
   json-tools.js            JSON 变换、结构扫描、类型生成
+  json-diff.js             JSON 结构差异（数组按标识键或 LCS 对齐）
   stream-parse.js          SSE / JSONL 分帧与各厂商 delta 提取
+  request-parse.js         请求体归一化、cURL 拆解、token 估算
   strings.js               全部界面文案
   editor.js                Monaco 配置
   renderer.js              Markdown → 净化后的 HTML
