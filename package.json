@@ -17,7 +17,6 @@
     "@fontsource/ibm-plex-mono": "^5.3.0",
     "dompurify": "^3.4.12",
     "highlight.js": "^11.11.1",
-    "html2pdf.js": "^0.14.0",
     "js-yaml": "^5.2.3",
     "jsonpath-plus": "^10.4.0",
     "jsonrepair": "^3.15.0",

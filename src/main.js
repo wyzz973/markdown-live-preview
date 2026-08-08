@@ -44,7 +44,6 @@ const init = () => {
         editorHost: document.querySelector('#editor'),
         preview: document.querySelector('#preview'),
         output: document.querySelector('#output'),
-        previewWrapper: document.querySelector('#preview-wrapper'),
         toolbar: document.querySelector('#toolbar'),
         outline: document.querySelector('#outline'),
         headingCount: document.querySelector('#heading-count'),
@@ -255,6 +254,9 @@ const init = () => {
     });
 
     let activeTool = 'markdown';
+    // Until the first tool is activated there is nothing in the editor, so the
+    // activation must load a buffer even when the kind already matches.
+    let bootstrapped = false;
 
     const activateTool = (id, { persist = true } = {}) => {
         const tool = toolsRegistry.byId(id);
@@ -298,12 +300,14 @@ const init = () => {
         if (isDocument) {
             // With a folder open the open file decides the type; otherwise the
             // tool brings its own scratch buffer forward.
-            if (!workspace.isFolderOpen() && workspace.scratchKind() !== tool.id) {
-                const text = workspace.switchScratch(
-                    tool.id,
-                    editor.getValue(),
-                    tool.id === 'json' ? defaultJson : defaultDocument
-                );
+            if (!workspace.isFolderOpen() && (!bootstrapped || workspace.scratchKind() !== tool.id)) {
+                const fallback = tool.id === 'json' ? defaultJson : defaultDocument;
+                // On first paint the editor is empty; handing that to
+                // switchScratch would persist the blank as the outgoing
+                // buffer and wipe whatever was saved.
+                const text = bootstrapped
+                    ? workspace.switchScratch(tool.id, editor.getValue(), fallback)
+                    : workspace.initialScratch(tool.id, fallback);
                 loading = true;
                 setDocType(tool.id);
                 editor.setValue(text);
@@ -503,9 +507,10 @@ const init = () => {
         el.exportButton.disabled = true;
         el.exportButton.textContent = t.exporting;
         try {
-            await toPdf({ source: el.previewWrapper, output: el.output });
+            await toPdf({ output: el.output, title: el.docTitle.textContent || t.appName });
         } catch (error) {
             console.error('导出 PDF 失败', error);
+            toast(t.exportFailed);
         } finally {
             el.exportButton.disabled = false;
             el.exportButton.textContent = t.exportPdf;
@@ -567,18 +572,14 @@ const init = () => {
 
     syncFolderChrome();
 
-    // Loading the scratch buffer is not an edit, so it must not mark the
-    // document dirty or trigger a save.
-    loading = true;
-    editor.setValue(read(KEYS.content) || defaultDocument);
-    loading = false;
-
-    editor.revealPosition({ lineNumber: 1, column: 1 });
     el.saveDot.title = t.saved;
 
     // Open on whichever tool was last used — a tool station should resume, not
-    // greet you with a landing page.
+    // greet you with a landing page. The activation loads that tool's own
+    // scratch buffer; startup must not preload one itself, or it would read a
+    // different key from the one saves are written to.
     activateTool(read(KEYS.activeTool, 'markdown'), { persist: false });
+    bootstrapped = true;
 };
 
 window.addEventListener('DOMContentLoaded', init);

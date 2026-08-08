@@ -12,7 +12,7 @@
 
 import * as files from './files.js';
 import { createIndex } from './search.js';
-import { read, write, KEYS, debounce } from './storage.js';
+import { read, write, remove, KEYS, debounce } from './storage.js';
 import { t } from './strings.js';
 
 const DISK_SAVE_DELAY = 700;
@@ -59,6 +59,17 @@ export const create = ({ onFilesChanged, onFileOpened, onDirtyChanged, onError }
     }, SCRATCH_SAVE_DELAY);
 
     const readScratch = (kind) => read(scratchKey(kind), null);
+
+    // Buffers used to live under one un-suffixed key. Move it across once so an
+    // existing document survives the split into per-tool buffers.
+    const migrateLegacyScratch = () => {
+        const legacy = read(KEYS.content, null);
+        if (legacy !== null && readScratch('markdown') === null) {
+            write(scratchKey('markdown'), legacy);
+        }
+        remove(KEYS.content);
+    };
+    migrateLegacyScratch();
 
     const recordEdit = (text) => {
         setDirty(true);
@@ -189,6 +200,12 @@ export const create = ({ onFilesChanged, onFileOpened, onDirtyChanged, onError }
             return readScratch(kind) ?? fallback;
         },
 
-        scratchKind: () => scratchKind
+        scratchKind: () => scratchKind,
+
+        // The buffer to show on first paint for a given tool.
+        initialScratch: (kind, fallback) => {
+            scratchKind = kind;
+            return readScratch(kind) ?? fallback;
+        }
     };
 };

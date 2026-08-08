@@ -91,7 +91,8 @@ export const t = {
     copied: '已复制',
     copyFailed: '复制失败',
     exportPdf: '导出 PDF',
-    exporting: '导出中',
+    exporting: '准备中',
+    exportFailed: '导出失败，文档没有改动。',
     syncScroll: '同步滚动',
 
     // view modes
