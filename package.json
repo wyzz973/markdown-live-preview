@@ -3,7 +3,7 @@
   "private": true,
   "version": "2.0.0",
   "type": "module",
-  "description": "本地优先的开发者工具站：Markdown 预览、JSON 处理、大模型流式响应还原、Unicode 转换，断网可用。",
+  "description": "本地优先的开发者工具站：Markdown 预览、JSON 处理、大模型请求体检查与流式响应还原、差异对比、Unicode 转换，断网可用。",
   "license": "MIT",
   "scripts": {
     "dev": "vite",

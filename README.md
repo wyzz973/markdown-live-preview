@@ -66,6 +66,13 @@
 - 流被截断时用 `jsonrepair` 补全，并如实标注"流被截断""修复 N 帧"
 - 还原出的正文可以一键送进 Markdown 工具继续编辑
 
+### Markdown
+
+- Monaco 编辑器，Markdown 语法高亮
+- 实时预览，沿用 GitHub Markdown 样式，明暗双主题
+- 代码块语法高亮（highlight.js，按需注册 35 种语言）
+- Mermaid 图表（按需加载）
+
 ### 导出 PDF
 
 不用 html2canvas / jsPDF。那条路是把预览**截图**成位图再按像素高度切片，分页器对内容
@@ -96,10 +103,6 @@ PDF 排版引擎：
 预览区刻意不做树视图：Monaco 已经折叠和着色，侧栏已经给出结构，第三份同样的树不产生新信息。
 那一栏改做**查询与转换**。
 
-- Monaco 编辑器，Markdown 语法高亮
-- 实时预览，沿用 GitHub Markdown 样式，明暗双主题
-- 代码块语法高亮（highlight.js，按需注册 35 种语言）
-- Mermaid 图表（按需加载）
 ## 其余能力
 
 - 打开单个文档（`⌘O`）直接编辑，或者打开整个文件夹，浏览、编辑、全文检索里面的 Markdown 与 JSON（`⌘K`）
