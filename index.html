@@ -50,8 +50,7 @@
           </svg>
         </button>
         <span class="sep" id="doc-sep">/</span>
-        <span class="doc-title" id="doc-title"></span>
-        <span class="dot" id="save-dot"></span>
+        <span class="doc-title" id="doc-title"><span class="doc-dir" id="doc-dir"></span><span class="doc-name" id="doc-name"></span></span>
 
         <div class="tool-menu" id="tool-menu" role="menu" hidden></div>
       </div>
@@ -105,7 +104,7 @@
               aria-selected="false" data-i18n="modeRead"></button>
     </div>
 
-    <main id="container" data-mode="split" data-rail="open" data-mobile-view="edit">
+    <main id="container" data-mode="split" data-rail="open" data-mobile-view="edit" data-workbench="document">
       <nav class="rail" id="rail" data-folder="closed">
         <div class="rail-head">
           <button type="button" class="folder-btn" id="folder-button"
@@ -138,27 +137,50 @@
           <h2 data-i18n="emptyFolderTitle"></h2>
           <p data-i18n="emptyFolderBody"></p>
           <div class="empty-actions">
-            <button type="button" class="open-btn" id="empty-open-file"
-                    data-i18n="openFile"></button>
-            <button type="button" class="open-btn ghost" id="empty-open-folder"
+            <button type="button" class="open-btn" id="empty-open-folder"
                     data-i18n="openFolder"></button>
+            <button type="button" class="open-btn ghost" id="empty-open-file"
+                    data-i18n="openFile"></button>
           </div>
           <p class="caveat" data-i18n="emptyFolderCaveat"></p>
         </div>
       </nav>
 
-      <section id="edit" class="pane">
-        <div class="toolbar" id="toolbar" role="toolbar"></div>
-        <div id="editor"></div>
-      </section>
-
-      <div id="split-divider" role="separator" aria-orientation="vertical" tabindex="0"></div>
-
-      <section id="preview" class="pane">
-        <div id="preview-wrapper">
-          <article id="output" class="markdown-body"></article>
+      <section class="docs" id="docs">
+        <div class="tabbar" id="tabbar">
+          <div class="tabs" id="tabs"></div>
+          <button type="button" class="tab-add" id="tab-add"
+                  aria-haspopup="menu" aria-expanded="false">+</button>
         </div>
-        <div id="json-panel-host"></div>
+
+        <div class="doc-banner" id="doc-banner" hidden></div>
+
+        <div class="panes" id="panes">
+          <section id="edit" class="pane">
+            <div class="toolbar" id="toolbar" role="toolbar"></div>
+            <div id="editor"></div>
+          </section>
+
+          <div id="split-divider" role="separator" aria-orientation="vertical" tabindex="0"
+               aria-valuemin="15" aria-valuemax="85"></div>
+
+          <section id="preview" class="pane">
+            <div id="preview-wrapper">
+              <article id="output" class="markdown-body"></article>
+            </div>
+            <div id="json-panel-host"></div>
+          </section>
+        </div>
+
+        <div class="docs-empty" id="docs-empty" hidden>
+          <h2 data-i18n="docsEmptyTitle"></h2>
+          <p data-i18n="docsEmptyBody"></p>
+          <div class="empty-actions">
+            <button type="button" class="open-btn" id="empty-new-markdown" data-i18n="newMarkdown"></button>
+            <button type="button" class="open-btn ghost" id="empty-new-json" data-i18n="newJson"></button>
+            <button type="button" class="open-btn ghost" id="empty-open-files" data-i18n="openFileItem"></button>
+          </div>
+        </div>
       </section>
 
       <div id="utility-host"></div>
@@ -171,6 +193,9 @@
       </div>
     </main>
 
-    <div class="toast" id="toast" role="status" hidden></div>
+    <div class="toast" id="toast" role="status" hidden>
+      <span class="toast-text" id="toast-text"></span>
+      <button type="button" class="toast-action" id="toast-action" hidden></button>
+    </div>
   </body>
 </html>

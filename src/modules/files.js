@@ -59,7 +59,7 @@ export const ensurePermission = async (handle, mode = 'readwrite') => {
 
 // Depth-first walk collecting Markdown files. Directory handles are kept on
 // each entry so a file can be read and written later without re-walking.
-const walk = async (directory, prefix, depth, collected) => {
+const walk = async (directory, prefix, depth, collected, root) => {
     if (depth > MAX_DEPTH || collected.length >= MAX_FILES) {
         return;
     }
@@ -88,7 +88,8 @@ const walk = async (directory, prefix, depth, collected) => {
                 name: entry.name,
                 dir: prefix,
                 path: prefix ? `${prefix}/${entry.name}` : entry.name,
-                handle: entry
+                handle: entry,
+                root
             });
             continue;
         }
@@ -97,14 +98,16 @@ const walk = async (directory, prefix, depth, collected) => {
             continue;
         }
 
-        await walk(entry, prefix ? `${prefix}/${entry.name}` : entry.name, depth + 1, collected);
+        await walk(entry, prefix ? `${prefix}/${entry.name}` : entry.name, depth + 1, collected, root);
     }
 };
 
-export const listMarkdownFiles = async (directoryHandle) => {
+// `root` is the folder's key in the recent-entries store; it goes on every
+// entry so a tab can tell which folder its file came from.
+export const listMarkdownFiles = async (directoryHandle, root = null) => {
     const collected = [];
-    await walk(directoryHandle, '', 0, collected);
-    return collected;
+    await walk(directoryHandle, '', 0, collected, root);
+    return { entries: collected, truncated: collected.length >= MAX_FILES };
 };
 
 // ----- reading and writing -----
@@ -112,6 +115,11 @@ export const listMarkdownFiles = async (directoryHandle) => {
 export const readFile = async (entry) => {
     const file = await entry.handle.getFile();
     return { text: await file.text(), modifiedAt: file.lastModified, size: file.size };
+};
+
+export const statFile = async (entry) => {
+    const file = await entry.handle.getFile();
+    return { modifiedAt: file.lastModified, size: file.size };
 };
 
 export const writeFile = async (entry, text) => {
@@ -124,35 +132,37 @@ export const writeFile = async (entry, text) => {
 
 // A single file becomes the same shape a folder walk produces, so everything
 // downstream — reading, writing, the dirty dot — works without a second path.
-export const entryForFile = (handle) => ({
+// `record` is its key in the recent-entries store, which is also how a
+// restored session finds the handle again.
+export const entryForFile = (handle, record = null) => ({
     name: handle.name,
     dir: '',
     path: handle.name,
-    handle
+    handle,
+    root: null,
+    record
 });
 
 // ----- picking and remembering -----
 
-export const pickDirectory = async () => {
-    const handle = await window.showDirectoryPicker({ mode: 'readwrite', id: 'notes' });
-    await remember(handle);
-    return handle;
-};
+export const pickDirectory = () => window.showDirectoryPicker({ mode: 'readwrite', id: 'notes' });
 
-export const pickFile = async () => {
-    const [handle] = await window.showOpenFilePicker({
-        id: 'notes',
-        multiple: false,
-        types: [
-            {
-                description: t.filePickerLabel,
-                accept: { 'text/*': documentExtensions().map((extension) => `.${extension}`) }
-            }
-        ]
-    });
-    await remember(handle);
-    return handle;
-};
+const documentTypes = () => [
+    {
+        description: t.filePickerLabel,
+        accept: { 'text/*': documentExtensions().map((extension) => `.${extension}`) }
+    }
+];
+
+// Several files at once: with tabs there is somewhere to put all of them.
+export const pickFiles = () =>
+    window.showOpenFilePicker({ id: 'notes', multiple: true, types: documentTypes() });
+
+export const canSaveAs = () =>
+    typeof window !== 'undefined' && typeof window.showSaveFilePicker === 'function';
+
+export const pickSaveFile = (suggestedName) =>
+    window.showSaveFilePicker({ id: 'notes', suggestedName, types: documentTypes() });
 
 // Recents used to be keyed by name, which collided for two folders called
 // `docs` — and would collide far harder now that files are in the list, where
@@ -174,16 +184,30 @@ const findRecord = async (handle) => {
     return null;
 };
 
+// Returns the record's id — the stable key a tab or a restored session uses
+// to refer to this handle.
 export const remember = async (handle) => {
     const existing = await findRecord(handle);
+    const id = existing?.id ?? `${handle.kind}:${crypto.randomUUID()}`;
     await putRecord({
-        id: existing?.id ?? `${handle.kind}:${crypto.randomUUID()}`,
+        id,
         kind: handle.kind,
         name: handle.name,
         handle,
         openedAt: Date.now()
     });
+    return id;
 };
+
+export const recordById = async (id) => {
+    try {
+        return (await allRecords()).find((record) => record.id === id && record.handle) ?? null;
+    } catch (error) {
+        return null;
+    }
+};
+
+export const permissionOf = (handle) => permissionState(handle);
 
 export const forget = (id) => deleteRecord(id);
 
@@ -199,6 +223,43 @@ export const recentEntries = async () => {
     } catch (error) {
         return [];
     }
+};
+
+// ----- relative paths -----
+
+// Resolve `target` as written in a document at `fromDir` (both relative to the
+// folder root) to a normalised path. Returns null for anything that is not a
+// plain relative path — URLs, absolute paths, anchors — or that climbs out of
+// the folder, which the browser could not open anyway.
+export const joinPath = (fromDir, target) => {
+    if (!target || /^[a-z][a-z0-9+.-]*:|^\/\/|^\/|^#/i.test(target)) return null;
+    let clean = target.split(/[?#]/)[0];
+    try {
+        clean = decodeURIComponent(clean);
+    } catch (error) {
+        // Leave a malformed escape as written.
+    }
+    const parts = fromDir ? fromDir.split('/') : [];
+    for (const part of clean.split('/')) {
+        if (part === '' || part === '.') continue;
+        if (part === '..') {
+            if (parts.length === 0) return null;
+            parts.pop();
+        } else {
+            parts.push(part);
+        }
+    }
+    return parts.length ? parts.join('/') : null;
+};
+
+// Walk a directory handle down a relative path to a file handle.
+export const fileAt = async (directory, path) => {
+    const parts = path.split('/');
+    let current = directory;
+    for (const part of parts.slice(0, -1)) {
+        current = await current.getDirectoryHandle(part);
+    }
+    return current.getFileHandle(parts.at(-1));
 };
 
 // Human-readable size for the rail.

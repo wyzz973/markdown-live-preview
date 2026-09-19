@@ -1,113 +1,41 @@
-// The workspace: what is open, which file is being edited, and where edits go.
+// The open folder: a library of documents to browse and search.
 //
-// Three modes, deliberately distinct:
-//   - 'scratch' : nothing opened; a buffer kept in localStorage (works in every
-//                 browser, including the ones without the File System Access API)
-//   - 'file'    : one file opened directly; it IS the document
-//   - 'folder'  : a library to browse and search; the selected file is the
-//                 document
-//
-// In both disk modes edits are written back to the file, debounced. Modes 'file'
-// and 'folder' differ only in what surrounds the document — the read/write path
-// is the same, which is why a single file is represented as the same entry shape
-// the folder walk produces rather than as a folder of one.
-//
-// The save dot in the header tells which state the buffer is in rather than
-// claiming "all changes saved" the way a cloud editor would.
+// What is open in tabs, and how each tab is saved, belongs to documents.js.
+// This module only knows which folder is on the shelf and what is in it — the
+// file list the rail draws, the index search reads, and the handle relative
+// paths are resolved against. It used to hold "the current file" and its save
+// timer as well; one timer shared by every file is what let an edit land in
+// the wrong file.
 
 import * as files from './files.js';
 import { createIndex } from './search.js';
-import { read, write, remove, KEYS, debounce } from './storage.js';
-import { t } from './strings.js';
 
-const DISK_SAVE_DELAY = 700;
-const SCRATCH_SAVE_DELAY = 300;
+// Re-walking a large tree on every return to the window would be wasted
+// work; files appearing a few seconds late is not.
+const REFRESH_INTERVAL = 5000;
 
-export const create = ({ onFilesChanged, onFileOpened, onDirtyChanged, onError }) => {
+export const create = ({ onChange }) => {
     const index = createIndex();
 
     let directory = null;
+    let key = null;
     let entries = [];
-    let current = null; // the open file entry, or null in scratch mode
-    let dirty = false;
+    let truncated = false;
+    let lastWalk = 0;
+    // A folder remembered from the last session that the browser has not
+    // granted access to again yet.
+    let pending = null;
+    let indexRun = 0;
+    let adoptRun = 0;
 
-    const mode = () => (directory ? 'folder' : current ? 'file' : 'scratch');
-
-    const setDirty = (next) => {
-        if (dirty === next) return;
-        dirty = next;
-        onDirtyChanged(next);
-    };
-
-    // ----- saving -----
-
-    const saveToDisk = debounce(async (text) => {
-        if (!current) return;
-        try {
-            const { size } = await files.writeFile(current, text);
-            current.size = size;
-            index.put(current, text);
-            setDirty(false);
-            onFilesChanged(entries);
-        } catch (error) {
-            onError(t.writeFileFailed);
-        }
-    }, DISK_SAVE_DELAY);
-
-    // Each document tool keeps its own scratch buffer. Sharing one would mean
-    // switching to the JSON tool hands it whatever Markdown you were writing
-    // and reports it as broken JSON.
-    let scratchKind = 'markdown';
-    const scratchKey = (kind) => `${KEYS.content}:${kind}`;
-
-    const saveScratch = debounce((text) => {
-        write(scratchKey(scratchKind), text);
-        setDirty(false);
-    }, SCRATCH_SAVE_DELAY);
-
-    const readScratch = (kind) => read(scratchKey(kind), null);
-
-    // Buffers used to live under one un-suffixed key. Move it across once so an
-    // existing document survives the split into per-tool buffers.
-    const migrateLegacyScratch = () => {
-        const legacy = read(KEYS.content, null);
-        if (legacy !== null && readScratch('markdown') === null) {
-            write(scratchKey('markdown'), legacy);
-        }
-        remove(KEYS.content);
-    };
-    migrateLegacyScratch();
-
-    const recordEdit = (text) => {
-        setDirty(true);
-        if (current) {
-            saveToDisk(text);
-        } else {
-            saveScratch(text);
-        }
-    };
-
-    // ----- opening -----
-
-    const openEntry = async (entry) => {
-        try {
-            const { text, size } = await files.readFile(entry);
-            entry.size = size;
-            current = entry;
-            index.put(entry, text);
-            onFileOpened({ entry, text });
-            setDirty(false);
-            onFilesChanged(entries);
-        } catch (error) {
-            onError(t.readFileFailed);
-        }
-    };
-
-    // Read every file once so search has something to work with. Done after the
-    // first file is on screen so the editor is usable immediately.
-    const buildIndex = async () => {
-        for (const entry of entries) {
-            if (entry === current) continue;
+    // Read every file once so search has something to work with. Done in the
+    // background so the folder is usable immediately; opening or closing a
+    // folder abandons a build still running for the previous one. Indexing a
+    // few newly found files (`only`) does not cancel the full build.
+    const buildIndex = async (only = null) => {
+        const run = only ? indexRun : ++indexRun;
+        for (const entry of only ?? entries) {
+            if (run !== indexRun) return;
             try {
                 const { text, size } = await files.readFile(entry);
                 entry.size = size;
@@ -116,173 +44,132 @@ export const create = ({ onFilesChanged, onFileOpened, onDirtyChanged, onError }
                 // A file that cannot be read is simply not searchable.
             }
         }
-        onFilesChanged(entries);
+        if (run === indexRun) onChange('index');
     };
 
-    const adoptDirectory = async (handle) => {
+    // Nothing changes until the walk has succeeded, so a folder that cannot
+    // be read leaves the previous one on the shelf. When two folders are being
+    // opened at once, the one asked for last wins, not the one walked fastest.
+    const adopt = async (handle, record = null) => {
+        const run = ++adoptRun;
+        const nextKey = record ?? (await files.remember(handle));
+        const result = await files.listMarkdownFiles(handle, nextKey);
+        if (run !== adoptRun) return entries;
         directory = handle;
-        entries = await files.listMarkdownFiles(handle);
+        key = nextKey;
+        pending = null;
+        lastWalk = Date.now();
+        entries = result.entries;
+        truncated = result.truncated;
         index.clear();
-        onFilesChanged(entries);
-
-        if (entries.length === 0) {
-            current = null;
-            onError(t.folderEmpty);
-            return;
-        }
-
-        await openEntry(entries[0]);
+        onChange('folder');
         buildIndex();
+        return entries;
     };
 
-    // One file, no library around it. The rail falls back to the outline of
-    // what is open, which is all there is to navigate.
-    const adoptFile = async (handle) => {
+    // From the picker. AbortError (the dialog was dismissed) propagates for
+    // the caller to ignore.
+    const open = async () => adopt(await files.pickDirectory());
+
+    // From a drop or the recent list: a handle that may not be authorised.
+    const openHandle = async (handle, record = null) => {
+        if (!(await files.ensurePermission(handle))) return false;
+        await adopt(handle, record);
+        return true;
+    };
+
+    // The folder of a previous session. It opens straight away when the
+    // browser still grants access (a reload, usually); otherwise it waits for
+    // `resume`, which has to run inside a click.
+    const restore = async (recordId) => {
+        const record = await files.recordById(recordId);
+        if (!record || record.kind !== 'directory') return 'gone';
+        try {
+            if ((await files.permissionOf(record.handle)) === 'granted') {
+                await adopt(record.handle, record.id);
+                return 'open';
+            }
+        } catch (error) {
+            return 'gone';
+        }
+        pending = record;
+        onChange('pending');
+        return 'pending';
+    };
+
+    const resume = async () => {
+        if (!pending) return false;
+        const record = pending;
+        if (!(await files.ensurePermission(record.handle))) return false;
+        await adopt(record.handle, record.id);
+        return true;
+    };
+
+    const close = () => {
+        adoptRun += 1;
         directory = null;
+        key = null;
         entries = [];
+        truncated = false;
+        pending = null;
+        indexRun += 1;
         index.clear();
-        // openEntry announces both the file and the (now empty) file list, so
-        // the chrome never paints a half-switched state.
-        await openEntry(files.entryForFile(handle));
+        onChange('folder');
     };
 
-    // Shared by the recent list and by dropping something on the window: both
-    // arrive holding a handle that may not be authorised yet.
-    const adopt = async (handle) => {
-        if (!(await files.ensurePermission(handle))) {
-            onError(t.permissionDenied);
-            return;
-        }
-        await files.remember(handle);
-        if (handle.kind === 'file') {
-            await adoptFile(handle);
-        } else {
-            await adoptDirectory(handle);
-        }
-    };
-
-    // AbortError means the user dismissed the picker; that is not a failure
-    // worth reporting.
-    const runPicker = async (pick, adoptPicked, failure) => {
+    // Pick up files added, renamed or removed outside the app. The walk is
+    // of the folder open when it started; if another folder was opened (or
+    // this one closed) meanwhile, its result is stale and dropped — otherwise
+    // a slow walk of the old folder could land on top of the new one.
+    const refresh = async ({ force = false } = {}) => {
+        if (!directory || (!force && Date.now() - lastWalk < REFRESH_INTERVAL)) return false;
+        const walked = directory;
+        const walkedKey = key;
+        let result;
         try {
-            await adoptPicked(await pick());
+            result = await files.listMarkdownFiles(walked, walkedKey);
         } catch (error) {
-            if (error?.name !== 'AbortError') {
-                onError(failure);
-            }
+            return false;
         }
-    };
+        if (directory !== walked) return false;
+        lastWalk = Date.now();
+        const known = new Map(entries.map((entry) => [entry.path, entry]));
+        const added = result.entries.filter((entry) => !known.has(entry.path));
+        const kept = new Set(result.entries.map((entry) => entry.path));
+        const removed = entries.filter((entry) => !kept.has(entry.path));
+        if (added.length === 0 && removed.length === 0) return false;
 
-    const openFolder = () =>
-        runPicker(files.pickDirectory, adoptDirectory, t.openFolderFailed);
-
-    const openFile = () => runPicker(files.pickFile, adoptFile, t.openFileFailed);
-
-    const openHandle = async (handle) => {
-        try {
-            await adopt(handle);
-        } catch (error) {
-            onError(handle.kind === 'file' ? t.openFileFailed : t.openFolderFailed);
-        }
-    };
-
-    // A remembered handle can outlive the thing it points at. Rather than
-    // reporting a generic failure every time, drop the record so the list
-    // reflects what is actually still there.
-    const reopenRecent = async (record) => {
-        try {
-            if (!(await files.ensurePermission(record.handle))) {
-                onError(t.permissionDenied);
-                return;
-            }
-            // openEntry reports its own read failures, so a file that has been
-            // moved or deleted would arrive as a vague "read failed". Touching
-            // it first lets the record be cleaned up instead.
-            if (record.kind === 'file') {
-                await record.handle.getFile();
-            }
-            await adopt(record.handle);
-        } catch (error) {
-            if (error?.name === 'NotFoundError') {
-                await files.forget(record.id);
-                onError(t.entryGone);
-                return;
-            }
-            onError(record.kind === 'file' ? t.openFileFailed : t.openFolderFailed);
-        }
-    };
-
-    // Step back from the open file without closing the library around it. Used
-    // when a utility hands a produced document to the editor: that text is a
-    // new scratch buffer, and leaving the file attached would send it to disk
-    // on the next autosave.
-    const detach = () => {
-        if (!current) return;
-        current = null;
-        setDirty(false);
-        onFilesChanged(entries);
-    };
-
-    const close = (scratchText) => {
-        directory = null;
-        entries = [];
-        current = null;
-        index.clear();
-        onFilesChanged(entries);
-        onFileOpened({ entry: null, text: scratchText ?? readScratch(scratchKind) ?? null });
-        setDirty(false);
+        // Keep the objects we already had, so sizes and open tabs still
+        // point at the same entries.
+        entries = result.entries.map((entry) => known.get(entry.path) ?? entry);
+        truncated = result.truncated;
+        removed.forEach((entry) => index.remove(entry.path));
+        onChange('folder');
+        buildIndex(added);
+        return true;
     };
 
     return {
-        openFolder,
-        openFile,
+        open,
         openHandle,
-        reopenRecent,
-        detach,
+        restore,
+        resume,
         close,
-        openEntry,
-        recordEdit,
+        refresh,
         search: (query) => index.search(query),
-        mode,
-        isFolderOpen: () => directory !== null,
-        // True whenever edits go to disk rather than to the scratch buffer.
-        isDocumentOpen: () => current !== null,
-        folderName: () => directory?.name ?? null,
-        // What the recent list should mark as current.
-        openHandleRef: () => directory ?? current?.handle ?? null,
+        indexPut: (entry, text) => {
+            if (entry?.root && entry.root === key) index.put(entry, text);
+        },
         entries: () => entries,
-        currentPath: () => current?.path ?? null,
-        currentEntry: () => current,
-        // Force a write now, bypassing the debounce — used by ⌘S.
-        flush: (text) => {
-            if (current) {
-                saveToDisk(text);
-                saveToDisk.flush();
-            } else {
-                saveScratch.cancel();
-                write(scratchKey(scratchKind), text);
-                setDirty(false);
-            }
-        },
-
-        // Switch which scratch buffer is live, persisting the outgoing one
-        // first. Returns the incoming buffer's text.
-        switchScratch: (kind, currentText, fallback) => {
-            if (!current) {
-                saveScratch.cancel();
-                write(scratchKey(scratchKind), currentText);
-            }
-            scratchKind = kind;
-            setDirty(false);
-            return readScratch(kind) ?? fallback;
-        },
-
-        scratchKind: () => scratchKind,
-
-        // The buffer to show on first paint for a given tool.
-        initialScratch: (kind, fallback) => {
-            scratchKind = kind;
-            return readScratch(kind) ?? fallback;
-        }
+        truncated: () => truncated,
+        isOpen: () => directory !== null,
+        key: () => key,
+        handle: () => directory,
+        name: () => directory?.name ?? pending?.name ?? null,
+        pending: () => pending,
+        entryByPath: (path) => entries.find((entry) => entry.path === path) ?? null,
+        // Any file under the folder by relative path, listed or not — images,
+        // for instance, are never in the list.
+        fileAt: (path) => (directory ? files.fileAt(directory, path) : Promise.reject(new Error('no folder')))
     };
 };

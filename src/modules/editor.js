@@ -27,10 +27,27 @@ monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
     schemaValidation: 'warning'
 });
 
-export const setLanguage = (editor, language) => {
-    const model = editor.getModel();
-    if (model && model.getLanguageId() !== language) {
-        monaco.editor.setModelLanguage(model, language);
+export const languageFor = (type) => (type === 'json' ? 'json' : 'markdown');
+
+// One model per open document. The editor itself is shared; switching tabs
+// swaps its model, which carries the text, the undo history and the
+// decorations with it. The old single model was refilled with setValue on
+// every file switch, which also wiped the undo stack each time.
+export const models = {
+    create(text, type) {
+        const model = monaco.editor.createModel(text, languageFor(type));
+        model.updateOptions({ tabSize: 2 });
+        return model;
+    },
+    dispose(model) {
+        if (!model.isDisposed()) model.dispose();
+    },
+    // Replace the whole text as one undoable step, so reloading a file that
+    // changed on disk can still be taken back with ⌘Z.
+    replace(model, text) {
+        model.pushStackElement();
+        model.pushEditOperations([], [{ range: model.getFullModelRange(), text }], () => null);
+        model.pushStackElement();
     }
 };
 

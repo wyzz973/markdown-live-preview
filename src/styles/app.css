@@ -148,17 +148,8 @@ button {
   white-space: nowrap;
 }
 
-/* The save state, told honestly: hollow when the buffer matches what is
-   stored, filled red when it does not. */
-.dot {
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  border: 1.5px solid var(--ink-faint);
-}
-
-.dot.dirty { background: var(--query); border-color: var(--query); }
+/* The folders a document sits in, quieter than its name. */
+.path .doc-dir { color: var(--ink-faint); font-weight: 400; }
 
 .bar-right {
   margin-left: auto;
@@ -240,18 +231,32 @@ button {
   pointer-events: none;
 }
 
+/* The document workbench: the tab strip across the top, a banner when a
+   document needs a decision, and the panes below. The rail stays full height
+   beside all three, the way a file tree sits beside an editor's tabs. */
+.docs {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--paper);
+}
+
+.panes {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
 .pane { min-width: 0; height: 100%; }
 
 /* A single custom property drives the split, so a window resize is handled by
-   layout alone — no JavaScript recomputing pixel widths. */
+   layout alone — no JavaScript recomputing pixel widths. The panes box
+   already excludes the rail, so the ratio applies to it directly. */
 #edit {
-  flex: 0 0 calc(var(--split-ratio, 0.5) * (100% - var(--rail-w)));
+  flex: 0 0 calc(var(--split-ratio, 0.5) * 100%);
   display: flex;
   flex-direction: column;
-}
-
-#container[data-rail='collapsed'] #edit {
-  flex-basis: calc(var(--split-ratio, 0.5) * 100%);
 }
 
 #preview {
@@ -261,7 +266,9 @@ button {
 
 #editor { flex: 1; min-height: 0; }
 
-#preview-wrapper { padding: 20px 24px 64px; }
+/* Positioned so the code block copy button can sit inside the scrolled
+   content and travel with it. */
+#preview-wrapper { position: relative; padding: 20px 24px 64px; }
 
 #split-divider {
   flex: none;
@@ -277,6 +284,229 @@ button {
 #split-divider.active { background: var(--wash); }
 
 body.is-resizing { user-select: none; cursor: col-resize; }
+
+/* ---------- tab strip ----------
+   One tab per open document, in the header's own material. A tab wears its
+   file name, extension and all, so no icon is needed to say what it is; a
+   scratch document wears its title instead, which is how the two are told
+   apart. The active tab takes the wash — the same mark the rail puts on the
+   same file — and unsaved work is the red dot, red meaning here what it
+   means everywhere in this app: this is not safe yet. */
+
+.tabbar {
+  position: relative;
+  flex: none;
+  display: flex;
+  height: 32px;
+  background: var(--galley);
+  border-bottom: 1px solid var(--edge);
+}
+
+.tabs {
+  display: flex;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar { display: none; }
+
+/* Tabs give up width before the strip scrolls: like a browser's, they shrink
+   toward a minimum (names ellipsised) so more of them stay in sight. */
+.tab {
+  position: relative;
+  flex: 0 1 auto;
+  min-width: 96px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 240px;
+  padding: 0 5px 0 12px;
+  border-right: 1px solid var(--edge);
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.tab:hover { background: var(--galley-sub); color: var(--ink); }
+
+.tab.is-active {
+  background: var(--wash);
+  color: var(--ink);
+}
+
+.tab.is-active .tab-name { font-weight: 500; }
+
+.tab-label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The folder, shown only when another open tab has the same file name. It
+   wears the trailing slash folders wear everywhere else in the app. */
+.tab-dir {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink-faint);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* A temporary tab — opened by a single click in the rail and replaced by the
+   next one — is set in italics until it is edited or double-clicked. */
+.tab.is-preview .tab-name { font-style: italic; }
+
+.tab.is-locked { color: var(--ink-faint); }
+
+/* A copy-editor strikes out what is gone. */
+.tab.is-missing .tab-name {
+  color: var(--ink-faint);
+  text-decoration: line-through;
+}
+
+.tab.is-conflict .tab-name { color: var(--query); }
+
+.tab-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  color: var(--ink-faint);
+  font: 400 14px/1 var(--mono);
+  visibility: hidden;
+}
+
+.tab:hover .tab-close,
+.tab.is-active .tab-close,
+.tab:focus-visible .tab-close { visibility: visible; }
+
+.tab-close:hover { background: var(--edge); color: var(--ink); }
+
+/* Unsaved: the close mark gives way to the dot until the pointer is on it. */
+.tab.is-dirty .tab-close,
+.tab.is-conflict .tab-close {
+  visibility: visible;
+  font-size: 0;
+}
+
+.tab.is-dirty .tab-close::before,
+.tab.is-conflict .tab-close::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--query);
+}
+
+.tab.is-dirty .tab-close:hover,
+.tab.is-conflict .tab-close:hover { font-size: 14px; }
+
+.tab.is-dirty .tab-close:hover::before,
+.tab.is-conflict .tab-close:hover::before { display: none; }
+
+.tab.is-dragging { opacity: 0.5; }
+
+body.is-dragging-tab,
+body.is-dragging-tab * { cursor: grabbing !important; }
+
+/* Where a dragged tab will land: a rule in ink, like the drop outline. */
+.tab-drop {
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  z-index: 2;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--ink);
+  pointer-events: none;
+}
+
+.tab-add {
+  flex: none;
+  width: 32px;
+  color: var(--ink-soft);
+  font: 400 16px/1 var(--mono);
+}
+
+.tab-add:hover { background: var(--galley-sub); color: var(--ink); }
+.tab-add[aria-expanded='true'] { background: var(--wash); color: var(--ink); }
+
+/* ---------- banner ----------
+   A document that needs a decision says so above its text, in words, with
+   the choices beside them. Only a real problem gets the red label. */
+
+.doc-banner {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--edge);
+  background: var(--galley);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.banner-label { flex: none; font-weight: 600; color: var(--ink); }
+.doc-banner[data-tone='bad'] .banner-label { color: var(--query); }
+.banner-text { flex: 1 1 18rem; min-width: 0; color: var(--ink-soft); }
+.banner-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+
+.banner-actions button {
+  padding: 3px 9px;
+  border-radius: var(--radius);
+  box-shadow: inset 0 0 0 1px var(--edge);
+  color: var(--ink-soft);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.banner-actions button:hover { background: var(--galley-sub); color: var(--ink); }
+
+.banner-actions button.primary {
+  background: var(--ink);
+  box-shadow: none;
+  color: var(--paper);
+  font-weight: 500;
+}
+
+/* A tab still waiting for access has no outline to describe yet; the
+   "no headings" hint would read as a statement about the file. */
+#container[data-doc-state='locked'] .outline-empty { display: none; }
+
+/* ---------- nothing open ---------- */
+
+#container[data-docs='none'] .panes,
+#container[data-docs='none'] .doc-banner { display: none; }
+
+.docs-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  max-width: 34rem;
+  padding: 0 40px 12vh;
+}
+
+.docs-empty h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.docs-empty p { margin: 0; color: var(--ink-soft); font-size: 12.5px; line-height: 1.7; }
 
 /* ---------- the outline rail ----------
    Folder depth and heading depth are one tree; this is its deeper half. The
@@ -350,6 +580,25 @@ body.is-resizing { user-select: none; cursor: col-resize; }
   background: var(--galley);
   box-shadow: 0 12px 28px -12px rgba(0, 0, 0, 0.45);
 }
+
+/* Menus built on demand — the tab strip's + and every tab's context menu.
+   The same material as the menus that live in the page. */
+.popup-menu {
+  position: fixed;
+  z-index: 50;
+  min-width: 200px;
+  max-width: 320px;
+  padding: 5px;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: var(--galley);
+  box-shadow: 0 12px 28px -12px rgba(0, 0, 0, 0.45);
+}
+
+.popup-menu .menu-item { align-items: center; gap: 12px; }
+.popup-menu .menu-item:disabled { color: var(--ink-faint); cursor: default; }
+.popup-menu .menu-item:disabled:hover { background: transparent; }
+.popup-menu .menu-item:focus-visible { outline-offset: -2px; }
 
 .menu-label {
   display: block;
@@ -645,9 +894,7 @@ body.is-resizing { user-select: none; cursor: col-resize; }
 #container[data-workbench='utility'] #utility-host { display: flex; }
 
 #container[data-workbench='utility'] .rail,
-#container[data-workbench='utility'] #edit,
-#container[data-workbench='utility'] #preview,
-#container[data-workbench='utility'] #split-divider { display: none; }
+#container[data-workbench='utility'] .docs { display: none; }
 
 .utility { display: flex; flex: 1; min-width: 0; }
 
@@ -1323,6 +1570,10 @@ button.ghost.active { background: var(--wash); color: var(--ink); font-weight: 5
 
 .result mark { background: var(--wash); color: var(--ink); border-radius: 2px; }
 
+/* Tabs, files and lines each under their own small heading. */
+.results .palette-section { padding: 8px 10px 3px; }
+.results .palette-section:first-child { padding-top: 4px; }
+
 .palette-empty {
   margin: 0;
   padding: 20px 16px;
@@ -1334,6 +1585,9 @@ button.ghost.active { background: var(--wash); color: var(--ink); font-weight: 5
 /* ---------- toast ---------- */
 
 .toast {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
   position: fixed;
   left: 50%;
   bottom: 24px;
@@ -1348,6 +1602,15 @@ button.ghost.active { background: var(--wash); color: var(--ink); font-weight: 5
   font-size: 12.5px;
   line-height: 1.6;
   box-shadow: 0 12px 32px -14px rgba(0, 0, 0, 0.5);
+}
+
+.toast-action {
+  flex: none;
+  padding: 0;
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 /* ---------- scrollbars ---------- */
@@ -1436,6 +1699,29 @@ button.ghost.active { background: var(--wash); color: var(--ink); font-weight: 5
   text-align: left;
 }
 
+/* One copy button, moved to whichever code block the pointer is over (see
+   preview.js). Absolutely placed inside the scrolled content, so it travels
+   with its block. */
+.code-copy {
+  position: absolute;
+  z-index: 2;
+  padding: 2px 8px;
+  border-radius: var(--radius);
+  background: var(--galley);
+  box-shadow: inset 0 0 0 1px var(--edge);
+  color: var(--ink-soft);
+  font: 400 11.5px/1.6 var(--ui);
+}
+
+.code-copy:hover { color: var(--ink); background: var(--galley-sub); }
+
+/* YAML front matter: metadata, set quieter than the document it describes. */
+#output.markdown-body pre.front-matter {
+  margin-bottom: 20px;
+  font-size: 80%;
+  opacity: 0.85;
+}
+
 /* Read mode gives the document a measure instead of the full pane width.
    Stated in pixels on purpose: `em` here would resolve against the 13px chrome
    font rather than the preview's 16px body, landing about 25% too narrow.
@@ -1511,8 +1797,8 @@ button.ghost.active { background: var(--wash); color: var(--ink); font-weight: 5
      window narrowed while in 阅读 mode leaves the editor tab showing nothing —
      these rules and the tab rules below have equal specificity, so order is
      what decides. */
-  #container[data-mode='edit'] #preview,
-  #container[data-mode='read'] #edit { display: block; }
+  #container[data-mode='edit'] #preview { display: block; }
+  #container[data-mode='read'] #edit { display: flex; }
 
   #container[data-mobile-view='edit'] #preview,
   #container[data-mobile-view='preview'] #edit { display: none; }

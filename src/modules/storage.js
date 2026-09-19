@@ -16,12 +16,15 @@ export const read = (name, fallback = null) => {
     }
 };
 
+// Returns whether the value was stored. Quota exceeded or storage disabled
+// (private mode) must not break the editor, but the caller that is keeping
+// someone's only copy of a text needs to know.
 export const write = (name, value) => {
     try {
         localStorage.setItem(key(name), JSON.stringify(value));
+        return true;
     } catch (error) {
-        // Quota exceeded or storage disabled (private mode) — losing the
-        // autosave is acceptable, breaking the editor is not.
+        return false;
     }
 };
 
@@ -33,8 +36,26 @@ export const remove = (name) => {
     }
 };
 
+// Every stored name that starts with `prefix`, without the namespace.
+export const names = (prefix = '') => {
+    const found = [];
+    try {
+        for (let i = 0; i < localStorage.length; i += 1) {
+            const full = localStorage.key(i);
+            if (full?.startsWith(`${NAMESPACE}:${prefix}`)) {
+                found.push(full.slice(NAMESPACE.length + 1));
+            }
+        }
+    } catch (error) {
+        // Storage unavailable: nothing to list.
+    }
+    return found;
+};
+
 export const KEYS = {
     content: 'content',
+    session: 'session',
+    backups: 'backups',
     scrollSync: 'scroll-sync',
     theme: 'theme',
     splitRatio: 'split-ratio',

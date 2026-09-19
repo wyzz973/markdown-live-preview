@@ -29,8 +29,6 @@ const TOOLS = [
 // Unicode round-trip Chinese payloads force on you — have no equivalent in the
 // Markdown set. Labels are words rather than syntax because JSON's operations
 // are transforms of the whole document, not characters you insert.
-const jsonAction = (run) => ({ run });
-
 export const setup = ({ container, editor, jsonOps }) => {
     const model = () => editor.getModel();
 
@@ -65,6 +63,8 @@ export const setup = ({ container, editor, jsonOps }) => {
     };
 
     const applyTool = (tool) => {
+        // No document in the editor (a tab still waiting for access).
+        if (!model()) return;
         const selection = editor.getSelection();
         const selected = model().getValueInRange(selection);
 
@@ -103,7 +103,9 @@ export const setup = ({ container, editor, jsonOps }) => {
         button.type = 'button';
         button.textContent = tool.label;
         button.title = tool.title();
-        button.setAttribute('aria-label', tool.title());
+        // The accessible name has to contain the visible label, or speech
+        // input ("click 1.") cannot reach the button.
+        button.setAttribute('aria-label', `${tool.title()} ${tool.label}`);
         button.addEventListener('click', () => applyTool(tool));
         markdownButtons.appendChild(button);
     });
@@ -120,6 +122,7 @@ export const setup = ({ container, editor, jsonOps }) => {
     // leaves the document untouched and says why rather than silently doing
     // nothing.
     const transform = (fn) => () => {
+        if (!model()) return;
         try {
             const next = fn(editor.getValue());
             if (typeof next === 'string') {

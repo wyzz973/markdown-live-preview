@@ -187,59 +187,138 @@ const pascal = (name) => {
     return cleaned || 'Root';
 };
 
-const tsTypeOf = (value, name, collected) => {
-    if (value === null) return 'null';
-    if (Array.isArray(value)) {
-        if (value.length === 0) return 'unknown[]';
-        const inner = tsTypeOf(value[0], name, collected);
-        return `${inner}[]`;
+// Types are inferred from every value that occurs at a position, not from the
+// first one. Reading only `array[0]` turned `tags: []` in the first record into
+// `unknown[]` although every later record held strings, and dropped any field
+// the first record happened to lack. A shape accumulates what each position
+// has held; a field missing from some records becomes optional.
+const blankShape = () => ({ kinds: new Set(), element: null, fields: new Map(), objects: 0 });
+
+const absorb = (shape, value) => {
+    if (value === null) {
+        shape.kinds.add('null');
+    } else if (Array.isArray(value)) {
+        shape.kinds.add('array');
+        shape.element ??= blankShape();
+        value.forEach((item) => absorb(shape.element, item));
+    } else if (typeof value === 'object') {
+        shape.kinds.add('object');
+        shape.objects += 1;
+        Object.entries(value).forEach(([key, item]) => {
+            let field = shape.fields.get(key);
+            if (!field) {
+                field = { shape: blankShape(), count: 0 };
+                shape.fields.set(key, field);
+            }
+            field.count += 1;
+            absorb(field.shape, item);
+        });
+    } else if (typeof value === 'number') {
+        shape.kinds.add(Number.isInteger(value) ? 'integer' : 'float');
+    } else {
+        shape.kinds.add(typeof value === 'boolean' ? 'boolean' : 'string');
     }
-    if (typeof value === 'object') {
-        const typeName = pascal(name);
-        const fields = Object.entries(value).map(
-            ([key, item]) => `  ${/^[A-Za-z_$][\w$]*$/.test(key) ? key : JSON.stringify(key)}: ${tsTypeOf(item, key, collected)};`
-        );
-        collected.set(typeName, `interface ${typeName} {\n${fields.join('\n')}\n}`);
-        return typeName;
-    }
-    return typeof value === 'number' ? 'number' : typeof value === 'boolean' ? 'boolean' : 'string';
+    return shape;
 };
+
+const shapeOf = (value) => absorb(blankShape(), value);
+
+// Two positions with the same key but different contents must not overwrite
+// each other's declaration; the second one gets a numbered name.
+const declare = (collected, baseName, body) => {
+    for (let n = 1; ; n += 1) {
+        const name = n === 1 ? baseName : `${baseName}${n}`;
+        const existing = collected.get(name);
+        if (existing === undefined || existing.body === body) {
+            collected.set(name, { body, order: existing?.order ?? collected.size });
+            return name;
+        }
+    }
+};
+
+const TS_IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
+
+const tsTypeOf = (shape, name, collected) => {
+    const parts = [];
+    if (shape.kinds.has('object')) {
+        const fields = [...shape.fields].map(([key, field]) => {
+            const optional = field.count < shape.objects ? '?' : '';
+            const label = TS_IDENTIFIER.test(key) ? key : JSON.stringify(key);
+            return `  ${label}${optional}: ${tsTypeOf(field.shape, key, collected)};`;
+        });
+        const typeName = pascal(name);
+        const body = `{\n${fields.join('\n')}\n}`;
+        parts.push(declare(collected, typeName, body));
+    }
+    if (shape.kinds.has('array')) {
+        const inner = shape.element && shape.element.kinds.size ? tsTypeOf(shape.element, name, collected) : 'unknown';
+        parts.push(inner.includes(' | ') ? `(${inner})[]` : `${inner}[]`);
+    }
+    if (shape.kinds.has('string')) parts.push('string');
+    if (shape.kinds.has('integer') || shape.kinds.has('float')) parts.push('number');
+    if (shape.kinds.has('boolean')) parts.push('boolean');
+    if (shape.kinds.has('null')) parts.push('null');
+    return parts.length ? parts.join(' | ') : 'unknown';
+};
+
+// Root first, then each type after the one that uses it — the order people
+// read a payload in.
+const emit = (collected, render) =>
+    [...collected]
+        .sort((a, b) => b[1].order - a[1].order)
+        .map(([name, { body }]) => render(name, body))
+        .join('\n\n');
+
+// An array at the root names its elements after the root, so the alias for
+// the root itself stays free.
+const rootNameFor = (shape, rootName) => (shape.kinds.has('object') ? rootName : `${rootName}Item`);
 
 export const toTypeScript = (value, rootName = 'Root') => {
     const collected = new Map();
-    const root = tsTypeOf(value, rootName, collected);
-    const blocks = [...collected.values()];
-    if (blocks.length === 0) {
-        return `type ${pascal(rootName)} = ${root};`;
-    }
-    // Deepest-defined first so the root interface reads last.
-    return blocks.reverse().join('\n\n');
+    const shape = shapeOf(value);
+    const root = tsTypeOf(shape, rootNameFor(shape, rootName), collected);
+    const declarations = emit(collected, (name, body) => `interface ${name} ${body}`);
+    if (root === pascal(rootName)) return declarations;
+    const alias = `type ${pascal(rootName)} = ${root};`;
+    return declarations ? `${declarations}\n\n${alias}` : alias;
 };
 
-const goTypeOf = (value, name, collected) => {
-    if (value === null) return 'any';
-    if (Array.isArray(value)) {
-        return value.length === 0 ? '[]any' : `[]${goTypeOf(value[0], name, collected)}`;
+// Go has no unions: a position that has held more than one kind of value is
+// `any`, a nullable one is a pointer, and a field some records lack gets
+// `omitempty`.
+const goTypeOf = (shape, name, collected) => {
+    const kinds = new Set(shape.kinds);
+    const nullable = kinds.delete('null');
+    if (kinds.has('integer') && kinds.has('float')) kinds.delete('integer');
+
+    if (kinds.size === 0) return 'any';
+    if (kinds.size > 1) return 'any';
+
+    const [kind] = kinds;
+    let type;
+    if (kind === 'object') {
+        const fields = [...shape.fields].map(([key, field]) => {
+            const tag = field.count < shape.objects ? `${key},omitempty` : key;
+            return `\t${pascal(key)} ${goTypeOf(field.shape, key, collected)} \`json:"${tag}"\``;
+        });
+        type = declare(collected, pascal(name), `struct {\n${fields.join('\n')}\n}`);
+    } else if (kind === 'array') {
+        const inner = shape.element && shape.element.kinds.size ? goTypeOf(shape.element, name, collected) : 'any';
+        return `[]${inner}`;
+    } else {
+        type = { string: 'string', integer: 'int', float: 'float64', boolean: 'bool' }[kind];
     }
-    if (typeof value === 'object') {
-        const typeName = pascal(name);
-        const fields = Object.entries(value).map(
-            ([key, item]) =>
-                `\t${pascal(key)} ${goTypeOf(item, key, collected)} \`json:"${key}"\``
-        );
-        collected.set(typeName, `type ${typeName} struct {\n${fields.join('\n')}\n}`);
-        return typeName;
-    }
-    if (typeof value === 'boolean') return 'bool';
-    if (typeof value === 'number') return Number.isInteger(value) ? 'int' : 'float64';
-    return 'string';
+    return nullable ? `*${type}` : type;
 };
 
 export const toGo = (value, rootName = 'Root') => {
     const collected = new Map();
-    const root = goTypeOf(value, rootName, collected);
-    const blocks = [...collected.values()];
-    return blocks.length === 0 ? `type ${pascal(rootName)} = ${root}` : blocks.reverse().join('\n\n');
+    const shape = shapeOf(value);
+    const root = goTypeOf(shape, rootNameFor(shape, rootName), collected);
+    const declarations = emit(collected, (name, body) => `type ${name} ${body}`);
+    if (root === pascal(rootName)) return declarations;
+    const alias = `type ${pascal(rootName)} ${root}`;
+    return declarations ? `${declarations}\n\n${alias}` : alias;
 };
 
 // ----- outline -----
@@ -291,7 +370,11 @@ export const outlineFromText = (text) => {
             index: rows.length
         };
 
+        // Hidden when its parent is: an element past the array cap used to
+        // disappear while its own children (every `tags`, every `profile`)
+        // still filled the rail, orphaned under the last visible element.
         const visible =
+            (!parent || parent.index >= 0) &&
             frame.level <= MAX_DEPTH &&
             !(parent?.isArray && parent.commas >= MAX_ARRAY_CHILDREN);
 

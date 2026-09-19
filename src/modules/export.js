@@ -19,6 +19,7 @@
 
 import * as theme from './theme.js';
 import * as mermaidRenderer from './mermaid.js';
+import { escapeHtml } from './markdown.js';
 
 // Pulled from the live document so the print copy keeps the app's typeface
 // rather than falling back to a system font mid-export.
@@ -136,7 +137,7 @@ const buildDocument = ({ html, title, fontFaces, markdownCss }) => `<!doctype ht
   <head>
     <meta charset="utf-8">
     <base href="${document.baseURI}">
-    <title>${title}</title>
+    <title>${escapeHtml(title)}</title>
     <style>${fontFaces}</style>
     <style>${markdownCss}</style>
     <style>${PRINT_CSS}</style>
@@ -175,11 +176,11 @@ export const toPdf = async ({ output, title = 'Markdown' }) => {
 
     const wasDark = theme.isDark();
 
-    // A dark diagram on white paper is unreadable, so re-render Mermaid in the
-    // light theme for the capture and restore afterwards.
-    mermaidRenderer.cancelScheduledRender();
+    // A dark diagram on white paper is unreadable, so draw Mermaid in the
+    // light theme for the capture and restore afterwards. Both drawings are
+    // cached, so the round trip costs nothing the second time.
     if (wasDark) {
-        await mermaidRenderer.renderNow(output, 'default');
+        await mermaidRenderer.render(output, 'default');
     }
 
     const frame = document.createElement('iframe');
@@ -213,7 +214,7 @@ export const toPdf = async ({ output, title = 'Markdown' }) => {
         setTimeout(() => frame.remove(), 1000);
 
         if (wasDark) {
-            await mermaidRenderer.renderNow(output, 'dark');
+            await mermaidRenderer.render(output, 'dark');
         }
     }
 };

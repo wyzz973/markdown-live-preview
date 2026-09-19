@@ -97,14 +97,16 @@ export const create = () => {
     const sampleButton = ghost(t.diffSample, () => {
         original.setValue(SAMPLE_LEFT);
         modified.setValue(SAMPLE_RIGHT);
-        run();
+        leftLabel.textContent = t.diffOriginal;
+        rightLabel.textContent = t.diffModified;
+        scheduleRecompute.flush();
     });
 
     const swapButton = ghost(t.swap, () => {
         const left = original.getValue();
         original.setValue(modified.getValue());
         modified.setValue(left);
-        run();
+        scheduleRecompute.flush();
     });
 
     const formatButton = ghost(t.diffFormatBoth, () => {
@@ -114,7 +116,7 @@ export const create = () => {
                 model.setValue(JSON.stringify(parsed.value, null, 2));
             }
         });
-        run();
+        scheduleRecompute.flush();
     });
 
     const whitespaceToggle = document.createElement('label');
@@ -151,10 +153,11 @@ export const create = () => {
     // monochrome diff depends on knowing it.
     const columns = document.createElement('div');
     columns.className = 'diff-columns';
-    [t.diffOriginal, t.diffModified].forEach((label) => {
+    const [leftLabel, rightLabel] = [t.diffOriginal, t.diffModified].map((label) => {
         const cell = document.createElement('span');
         cell.textContent = label;
         columns.appendChild(cell);
+        return cell;
     });
 
     const diffHost = document.createElement('div');
@@ -351,6 +354,21 @@ export const create = () => {
         focus: () => {
             diffEditor.layout();
             diffEditor.getOriginalEditor().focus();
+        },
+        // Fill both sides from elsewhere in the app: two tabs compared, or a
+        // file's version on disk against the one in the editor. The column
+        // labels say which is which, since the whole reading of a monochrome
+        // diff depends on knowing it.
+        load: ({ left, right, leftName = t.diffOriginal, rightName = t.diffModified }) => {
+            original.setValue(left);
+            modified.setValue(right);
+            leftLabel.textContent = leftName;
+            rightLabel.textContent = rightName;
+            leftLabel.title = leftName;
+            rightLabel.title = rightName;
+            activeTab = 'side';
+            scheduleRecompute.cancel();
+            recompute();
         }
     };
 };

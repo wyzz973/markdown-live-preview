@@ -4,6 +4,11 @@
 // and the rail already carries the structure, so a third copy of the same tree
 // would earn nothing. What is missing is everything you want to *do* with the
 // payload — query it, convert it, check it — so that is what this pane is.
+//
+// Query and conversion compose: with a JSONPath typed in, every conversion
+// works on what the query selected, so `$.data` then CSV turns the records of
+// an API response into a table instead of one row holding the whole payload.
+// Which mode and which query are per tab; the tab carries them (see main.js).
 
 import * as json from '../modules/json-tools.js';
 import { t } from '../modules/strings.js';
@@ -17,7 +22,7 @@ const MODES = [
     { id: 'go', label: () => t.convertGo }
 ];
 
-export const create = ({ onOpenInMarkdown }) => {
+export const create = ({ onOpenInMarkdown, onStateChange }) => {
     let parsed = { ok: true, value: null, empty: true };
     let mode = 'query';
     let path = '';
@@ -40,6 +45,7 @@ export const create = ({ onOpenInMarkdown }) => {
         button.addEventListener('click', () => {
             mode = item.id;
             paint();
+            onStateChange?.();
         });
         bar.appendChild(button);
         return button;
@@ -57,6 +63,7 @@ export const create = ({ onOpenInMarkdown }) => {
     queryInput.addEventListener('input', () => {
         path = queryInput.value;
         paint();
+        onStateChange?.();
     });
 
     const queryCount = document.createElement('span');
@@ -108,8 +115,7 @@ export const create = ({ onOpenInMarkdown }) => {
         note.className = tone ? `json-note json-note-${tone}` : 'json-note';
     };
 
-    const convert = () => {
-        const value = parsed.value;
+    const convert = (value) => {
         if (mode === 'yaml') return { text: json.toYaml(value) };
         if (mode === 'ts') return { text: json.toTypeScript(value) };
         if (mode === 'go') return { text: json.toGo(value) };
@@ -118,6 +124,12 @@ export const create = ({ onOpenInMarkdown }) => {
         return table === null ? { error: t.convertNeedsRows } : { text: table };
     };
 
+    // Whether the document parses, said every time: a query with no matches
+    // on a document that only parsed after repair used to report nothing but
+    // "0 个匹配".
+    const validity = () =>
+        parsed.repaired ? { text: t.jsonRepaired, tone: 'warn' } : { text: t.jsonValid, tone: 'good' };
+
     const paint = () => {
         modeButtons.forEach((button) => {
             const selected = button.dataset.mode === mode;
@@ -125,8 +137,8 @@ export const create = ({ onOpenInMarkdown }) => {
             button.setAttribute('aria-selected', String(selected));
         });
 
-        queryRow.hidden = mode !== 'query';
         openMarkdownButton.hidden = mode !== 'markdown';
+        queryCount.textContent = '';
 
         if (parsed.empty) {
             setNote(t.jsonEmpty);
@@ -144,34 +156,46 @@ export const create = ({ onOpenInMarkdown }) => {
 
         actions.hidden = false;
 
-        if (mode === 'query') {
-            const result = json.query(parsed.value, path);
-            if (!result.ok) {
-                setNote(t.jsonQueryBad, 'bad');
-                queryCount.textContent = '';
-                output.textContent = '';
-                return;
-            }
-            if (result.empty) {
-                setNote(parsed.repaired ? t.jsonRepaired : t.jsonValid, parsed.repaired ? 'warn' : 'good');
-                queryCount.textContent = '';
-                output.textContent = JSON.stringify(parsed.value, null, 2);
-                return;
-            }
-            setNote(null);
-            queryCount.textContent = t.jsonQueryHits(result.result.length);
-            output.textContent = JSON.stringify(result.result, null, 2);
+        const result = json.query(parsed.value, path);
+        if (!result.ok) {
+            setNote(t.jsonQueryBad, 'bad');
+            output.textContent = '';
+            actions.hidden = true;
             return;
         }
 
-        const converted = convert();
+        // A path that selects one node (`$.data`) means that node, not a
+        // one-element list around it — otherwise `$.data` then CSV would see
+        // an array holding an array and refuse to make a table.
+        const selection = result.empty
+            ? parsed.value
+            : result.result.length === 1
+              ? result.result[0]
+              : result.result;
+        if (!result.empty) {
+            queryCount.textContent = t.jsonQueryHits(result.result.length);
+        }
+
+        if (mode === 'query') {
+            const { text, tone } = validity();
+            setNote(text, tone);
+            output.textContent = JSON.stringify(selection, null, 2);
+            return;
+        }
+
+        const converted = convert(selection);
         if (converted.error) {
             setNote(converted.error, 'warn');
             output.textContent = '';
             actions.hidden = true;
             return;
         }
-        setNote(null);
+        if (result.empty) {
+            const { text, tone } = validity();
+            setNote(text, tone);
+        } else {
+            setNote(t.jsonConvertingQuery(result.result.length), 'good');
+        }
         output.textContent = converted.text;
     };
 
@@ -183,6 +207,12 @@ export const create = ({ onOpenInMarkdown }) => {
         update(text) {
             parsed = json.parseLoose(text);
             paint();
+        },
+        getState: () => ({ mode, path }),
+        setState(state = {}) {
+            mode = MODES.some((item) => item.id === state.mode) ? state.mode : 'query';
+            path = state.path ?? '';
+            queryInput.value = path;
         }
     };
 };

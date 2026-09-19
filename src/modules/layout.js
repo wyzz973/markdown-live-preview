@@ -12,13 +12,16 @@ const clamp = (ratio) => Math.min(MAX_RATIO, Math.max(MIN_RATIO, ratio));
 
 export const isMobile = () => window.innerWidth <= MOBILE_BREAKPOINT;
 
-export const setupSplit = ({ container, divider, onResize }) => {
+export const setupSplit = ({ container, panes, divider, onResize }) => {
     // The panes used to be sized in pixels, which meant a resize handler had to
     // recompute both widths from a remembered ratio — and the double-click
     // reset never updated that ratio, so the next resize snapped them back.
     // Driving the split from one custom property makes resize pure layout.
     const applyRatio = (ratio) => {
         container.style.setProperty('--split-ratio', String(ratio));
+        // A focusable separator is a slider to assistive technology, and a
+        // slider needs its current value.
+        divider.setAttribute('aria-valuenow', String(Math.round(ratio * 100)));
         onResize?.();
     };
 
@@ -29,14 +32,13 @@ export const setupSplit = ({ container, divider, onResize }) => {
 
     let dragging = false;
 
+    // Measured against the panes themselves, which already exclude the rail.
     const ratioFromEvent = (event) => {
-        const bounds = container.getBoundingClientRect();
-        const railWidth = container.querySelector('.rail')?.getBoundingClientRect().width ?? 0;
-        const usable = bounds.width - railWidth;
-        if (usable <= 0) {
+        const bounds = panes.getBoundingClientRect();
+        if (bounds.width <= 0) {
             return ratio;
         }
-        return clamp((event.clientX - bounds.left - railWidth) / usable);
+        return clamp((event.clientX - bounds.left) / bounds.width);
     };
 
     // Pointer events cover mouse, touch and pen in one path — the old
